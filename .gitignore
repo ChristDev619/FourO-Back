@@ -1,0 +1,67 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files
+.env
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# Ignore Visual Studio files
+.vs/
+.vscode/
+
+# Ignore SQLite database files
+*.sqlite
+
+# Ignore Environment files
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+
+# Ignore logs directory and log files
+logs/
+*.log
+
+# Ignore uploads directory
+uploads/
+
+# Ignore sensitive environment and deployment files
+.env.backup
+env-vars.json
+aquafina-deployment/environment-variables.txt
+aquafina-deployment/azure-cloudshell-commands.sh
+aquafina-deployment/windows-powershell-commands.txt
+aquafina-deployment/DEPLOYMENT_STEPS.md
+aquafina-deployment/CLOUDSHELL_DEPLOYMENT.md

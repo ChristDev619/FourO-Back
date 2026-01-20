@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FourO Alert Notification</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #2f5e66 0%, #1a3a42 100%);
+            color: #ffffff;
+            padding: 30px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        .alert-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+        .content {
+            padding: 30px 20px;
+        }
+        .event-name {
+            color: #2f5e66;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .message {
+            background-color: #f9f9f9;
+            border-left: 4px solid #2f5e66;
+            padding: 15px;
+            margin: 20px 0;
+            font-size: 16px;
+            color: #333;
+            line-height: 1.6;
+        }
+        .details {
+            margin: 20px 0;
+        }
+        .detail-row {
+            display: flex;
+            padding: 12px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #555;
+            width: 140px;
+            flex-shrink: 0;
+        }
+        .detail-value {
+            color: #333;
+            font-weight: 500;
+        }
+        .value-change {
+            background-color: #fff3cd;
+            padding: 8px 12px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        .footer {
+            background-color: #f8f8f8;
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #777;
+            border-top: 1px solid #e0e0e0;
+        }
+        .footer a {
+            color: #2f5e66;
+            text-decoration: none;
+        }
+        .timestamp {
+            background-color: #e8f4f5;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+            margin-top: 20px;
+            font-size: 14px;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="alert-icon">🔔</div>
+            <h1>FourO Alert Notification</h1>
+        </div>
+        
+        <div class="content">
+            <div class="event-name">
+                {{eventName}}
+            </div>
+            
+            <div class="message">
+                {{message}}
+            </div>
+            
+            <div class="details">
+                <div class="detail-row">
+                    <div class="detail-label">Tag Name:</div>
+                    <div class="detail-value">{{tagName}}</div>
+                </div>
+                
+                <div class="detail-row">
+                    <div class="detail-label">Current State:</div>
+                    <div class="detail-value">
+                        <span class="value-change">{{valueDisplay}}</span>
+                    </div>
+                </div>
+                
+                <div class="detail-row">
+                    <div class="detail-label">Previous State:</div>
+                    <div class="detail-value">{{oldValueDisplay}}</div>
+                </div>
+            </div>
+            
+            <div class="timestamp">
+                <strong>Triggered at:</strong> {{timestamp}}
+            </div>
+            
+            <!-- Acknowledge Button -->
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{{acknowledgeUrl}}" 
+                   style="display: inline-block; 
+                          padding: 14px 32px; 
+                          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                          color: white;
+                          text-decoration: none;
+                          border-radius: 8px;
+                          font-weight: 600;
+                          font-size: 16px;
+                          box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);">
+                    ✓ Acknowledge This Notification
+                </a>
+                <p style="font-size: 12px; color: #777; margin-top: 10px;">
+                    Click the button to confirm you've seen this notification
+                </p>
+            </div>
+            
+            <!-- Escalation Warning (conditionally included) -->
+            {{escalationWarningSection}}
+        </div>
+        
+        <div class="footer">
+            <p>
+                This is an automated alert from your FourO monitoring system.<br>
+                <a href="#">View Dashboard</a> | <a href="#">Manage Notifications</a>
+            </p>
+            <p style="margin-top: 15px;">
+                © 2025 FourO. All rights reserved.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+

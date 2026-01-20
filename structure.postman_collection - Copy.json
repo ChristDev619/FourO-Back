@@ -1,0 +1,1024 @@
+[
+  {
+    "info": {
+      "_postman_id": "e9a34011-bd6f-4626-a9fa-904a4ca0cf4a",
+      "name": "Generators",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "Create Generator",
+        "request": {
+          "method": "POST",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Example Generator\", \"capacity\": 500, \"fuelType\": \"Diesel\", \"efficiency\": 0.85, \"operationalStatus\": \"Active\", \"locationId\": 1}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/generators",
+            "host": ["localhost:8011/api"],
+            "path": ["generators"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get All Generators",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/generators",
+            "host": ["localhost:8011/api"],
+            "path": ["generators"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get Generator by ID",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/generators/1",
+            "host": ["localhost:8011/api"],
+            "path": ["generators", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Update Generator",
+        "request": {
+          "method": "PATCH",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Updated Generator\", \"operationalStatus\": \"Inactive\"}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/generators/1",
+            "host": ["localhost:8011/api"],
+            "path": ["generators", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Delete Generator",
+        "request": {
+          "method": "DELETE",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/generators/1",
+            "host": ["localhost:8011/api"],
+            "path": ["generators", "1"]
+          }
+        },
+        "response": []
+      }
+    ]
+  },
+  {
+    "info": {
+      "_postman_id": "47f8b8ee-c129-4f27-ba89-6b07b93488a9",
+      "name": "Generator Tags",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "Create Generator Tag",
+        "request": {
+          "method": "POST",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Max Capacity\", \"generatorId\": 1}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/generatorTags",
+            "host": ["localhost:8011/api"],
+            "path": ["generatorTags"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get All Generator Tags",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/generatorTags",
+            "host": ["localhost:8011/api"],
+            "path": ["generatorTags"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get Generator Tag by ID",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/generatorTags/1",
+            "host": ["localhost:8011/api"],
+            "path": ["generatorTags", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Update Generator Tag",
+        "request": {
+          "method": "PATCH",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Updated Max Capacity\"}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/generatorTags/1",
+            "host": ["localhost:8011/api"],
+            "path": ["generatorTags", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Delete Generator Tag",
+        "request": {
+          "method": "DELETE",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/generatorTags/1",
+            "host": ["localhost:8011/api"],
+            "path": ["generatorTags", "1"]
+          }
+        },
+        "response": []
+      }
+    ]
+  },
+  {
+    "info": {
+      "_postman_id": "e563bb4f-d7cf-4c9e-8a7b-9869b6a0bb9e",
+      "name": "Generator Tag Values",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "Create Generator Tag Value",
+        "request": {
+          "method": "POST",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"generatorTagId\": 1, \"value\": \"450\"}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/generatorTagValues",
+            "host": ["localhost:8011/api"],
+            "path": ["generatorTagValues"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get All Generator Tag Values",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/generatorTagValues",
+            "host": ["localhost:8011/api"],
+            "path": ["generatorTagValues"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get Generator Tag Value by ID",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/generatorTagValues/1",
+            "host": ["localhost:8011/api"],
+            "path": ["generatorTagValues", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Update Generator Tag Value",
+        "request": {
+          "method": "PATCH",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"value\": \"455\"}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/generatorTagValues/1",
+            "host": ["localhost:8011/api"],
+            "path": ["generatorTagValues", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Delete Generator Tag Value",
+        "request": {
+          "method": "DELETE",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/generatorTagValues/1",
+            "host": ["localhost:8011/api"],
+            "path": ["generatorTagValues", "1"]
+          }
+        },
+        "response": []
+      }
+    ]
+  },
+  {
+    "info": {
+      "_postman_id": "aad4b6a3-aa0a-4b1a-9fa1-c2d8f897aafa",
+      "name": "Locations",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "Create Location",
+        "request": {
+          "method": "POST",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Main Plant\", \"description\": \"Primary location for operations\", \"squareFootage\": 20000, \"type\": \"Plant\"}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/locations",
+            "host": ["localhost:8011/api"],
+            "path": ["locations"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get All Locations",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/locations",
+            "host": ["localhost:8011/api"],
+            "path": ["locations"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get Location by ID",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/locations/1",
+            "host": ["localhost:8011/api"],
+            "path": ["locations", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Update Location",
+        "request": {
+          "method": "PATCH",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Updated Main Plant\"}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/locations/1",
+            "host": ["localhost:8011/api"],
+            "path": ["locations", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Delete Location",
+        "request": {
+          "method": "DELETE",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/locations/1",
+            "host": ["localhost:8011/api"],
+            "path": ["locations", "1"]
+          }
+        },
+        "response": []
+      }
+    ]
+  },
+  {
+    "info": {
+      "_postman_id": "330b1a9e-787b-4e4b-9c0e-2b1a1ea92f7b",
+      "name": "Machines",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "Create Machine",
+        "request": {
+          "method": "POST",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Turbine 1\", \"machineType\": \"Turbine\", \"operationalStatus\": \"Active\", \"criticality\": \"High\", \"lastMaintenanceDate\": \"2023-04-01\", \"scheduledMaintenanceDate\": \"2023-10-01\", \"locationId\": 1}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/machines",
+            "host": ["localhost:8011/api"],
+            "path": ["machines"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get All Machines",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/machines",
+            "host": ["localhost:8011/api"],
+            "path": ["machines"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get Machine by ID",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/machines/1",
+            "host": ["localhost:8011/api"],
+            "path": ["machines", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Update Machine",
+        "request": {
+          "method": "PATCH",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Updated Turbine 1\", \"operationalStatus\": \"Maintenance\"}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/machines/1",
+            "host": ["localhost:8011/api"],
+            "path": ["machines", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Delete Machine",
+        "request": {
+          "method": "DELETE",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/machines/1",
+            "host": ["localhost:8011/api"],
+            "path": ["machines", "1"]
+          }
+        },
+        "response": []
+      }
+    ]
+  },
+  {
+    "info": {
+      "_postman_id": "2c7c034c-39f7-4a98-a171-8c5fa9f9c1bd",
+      "name": "Meters",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "Create Meter",
+        "request": {
+          "method": "POST",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Electricity Meter 1\", \"machineId\": 1, \"locationId\": 1}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/meters",
+            "host": ["localhost:8011/api"],
+            "path": ["meters"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get All Meters",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/meters",
+            "host": ["localhost:8011/api"],
+            "path": ["meters"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get Meter by ID",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/meters/1",
+            "host": ["localhost:8011/api"],
+            "path": ["meters", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Update Meter",
+        "request": {
+          "method": "PATCH",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Updated Electricity Meter 1\"}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/meters/1",
+            "host": ["localhost:8011/api"],
+            "path": ["meters", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Delete Meter",
+        "request": {
+          "method": "DELETE",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/meters/1",
+            "host": ["localhost:8011/api"],
+            "path": ["meters", "1"]
+          }
+        },
+        "response": []
+      }
+    ]
+  },
+  {
+    "info": {
+      "_postman_id": "58ed3f31-b9a8-40d9-a6b1-a415463b3bf4",
+      "name": "Meter Tags",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "Create Meter Tag",
+        "request": {
+          "method": "POST",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Current Reading\", \"powerMeterId\": 1}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/meterTags",
+            "host": ["localhost:8011/api"],
+            "path": ["meterTags"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get All Meter Tags",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/meterTags",
+            "host": ["localhost:8011/api"],
+            "path": ["meterTags"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get Meter Tag by ID",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/meterTags/1",
+            "host": ["localhost:8011/api"],
+            "path": ["meterTags", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Update Meter Tag",
+        "request": {
+          "method": "PATCH",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"name\": \"Updated Current Reading\"}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/meterTags/1",
+            "host": ["localhost:8011/api"],
+            "path": ["meterTags", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Delete Meter Tag",
+        "request": {
+          "method": "DELETE",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/meterTags/1",
+            "host": ["localhost:8011/api"],
+            "path": ["meterTags", "1"]
+          }
+        },
+        "response": []
+      }
+    ]
+  },
+  {
+    "info": {
+      "_postman_id": "0c7c1ad2-14b9-466f-bfb4-c1d5d1f2bfc7",
+      "name": "Meter Tag Values",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "Create Meter Tag Value",
+        "request": {
+          "method": "POST",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"meterTagId\": 1, \"value\": 100.0, \"timestamp\": \"2023-04-18T12:00:00Z\"}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/meterTagValues",
+            "host": ["localhost:8011/api"],
+            "path": ["meterTagValues"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get All Meter Tag Values",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/meterTagValues",
+            "host": ["localhost:8011/api"],
+            "path": ["meterTagValues"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get Meter Tag Value by ID",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/meterTagValues/1",
+            "host": ["localhost:8011/api"],
+            "path": ["meterTagValues", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Update Meter Tag Value",
+        "request": {
+          "method": "PATCH",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\"value\": 105.0}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/meterTagValues/1",
+            "host": ["localhost:8011/api"],
+            "path": ["meterTagValues", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Delete Meter Tag Value",
+        "request": {
+          "method": "DELETE",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/meterTagValues/1",
+            "host": ["localhost:8011/api"],
+            "path": ["meterTagValues", "1"]
+          }
+        },
+        "response": []
+      }
+    ]
+  },
+  {
+    "info": {
+        "_postman_id": "e9a34011-bd6f-4626-a9fa-904a4ca0cf4a",
+        "name": "AccessList API",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "Create AccessList",
+        "request": {
+          "method": "POST",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"pages\": {\n    \"dashboard\": true,\n    \"settings\": true\n  }\n}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/accessLists",
+            "host": ["localhost:8011/api"],
+            "path": ["accessLists"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get All AccessLists",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/accessLists",
+            "host": ["localhost:8011/api"],
+            "path": ["accessLists"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Get AccessList by ID",
+        "request": {
+          "method": "GET",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/accessLists/1",
+            "host": ["localhost:8011/api"],
+            "path": ["accessLists", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Update AccessList",
+        "request": {
+          "method": "PUT",
+          "header": [],
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"pages\": {\n    \"dashboard\": true,\n    \"reports\": false\n  }\n}"
+          },
+          "url": {
+            "raw": "http://localhost:8011/api/accessLists/1",
+            "host": ["localhost:8011/api"],
+            "path": ["accessLists", "1"]
+          }
+        },
+        "response": []
+      },
+      {
+        "name": "Delete AccessList",
+        "request": {
+          "method": "DELETE",
+          "header": [],
+          "url": {
+            "raw": "http://localhost:8011/api/accessLists/1",
+            "host": ["localhost:8011/api"],
+            "path": ["accessLists", "1"]
+          }
+        },
+        "response": []
+      }
+    ]
+}
+,
+{
+  "info": {
+      "_postman_id": "6b8f5c87-3095-4583-94fd-58aa07b7e025",
+      "name": "Level API",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create Level",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Administrator\",\n  \"accessListId\": 1\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8011/api/levels",
+          "host": ["localhost:8011/api"],
+          "path": ["levels"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get All Levels",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8011/api/levels",
+          "host": ["localhost:8011/api"],
+          "path": ["levels"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Level by ID",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8011/api/levels/1",
+          "host": ["localhost:8011/api"],
+          "path": ["levels", "1"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Update Level",
+      "request": {
+        "method": "PUT",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Super Administrator\",\n  \"accessListId\": 2\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8011/api/levels/1",
+          "host": ["localhost:8011/api"],
+          "path": ["levels", "1"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Delete Level",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8011/api/levels/1",
+          "host": ["localhost:8011/api"],
+          "path": ["levels", "1"]
+        }
+      },
+      "response": []
+    }
+  ]
+}
+,
+{
+  "info": {
+      "_postman_id": "32fde93f-17f4-471c-9101-395d6d1a52c4",
+      "name": "Profile API",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create Profile",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"userId\": 1, \n  \"firstname\": \"John\", \n  \"lastname\": \"Doe\", \n  \"email\": \"johndoe@example.com\", \n  \"phoneNumber\": \"1234567890\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8011/api/profiles",
+          "host": ["localhost:8011/api"],
+          "path": ["profiles"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get All Profiles",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8011/api/profiles",
+          "host": ["localhost:8011/api"],
+          "path": ["profiles"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get Profile by User ID",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8011/api/profiles/1",
+          "host": ["localhost:8011/api"],
+          "path": ["profiles", "1"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Update Profile",
+      "request": {
+        "method": "PUT",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstname\": \"Jane\", \n  \"lastname\": \"Doe\", \n  \"email\": \"janedoe@example.com\", \n  \"phoneNumber\": \"0987654321\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8011/api/profiles/1",
+          "host": ["localhost:8011/api"],
+          "path": ["profiles", "1"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Delete Profile",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8011/api/profiles/1",
+          "host": ["localhost:8011/api"],
+          "path": ["profiles", "1"]
+        }
+      },
+      "response": []
+    }
+  ]
+}
+,
+{
+  "info": {
+      "_postman_id": "7d45f3ad-867b-4c8b-b5d5-4654c4d5f5c5",
+      "name": "User API",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create User",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"newuser\", \n  \"password\": \"securepassword123\", \n  \"role\": \"user\", \n  \"levelId\": 1\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8011/api/users",
+          "host": ["localhost:8011/api"],
+          "path": ["users"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get All Users",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8011/api/users",
+          "host": ["localhost:8011/api"],
+          "path": ["users"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get User by ID",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8011/api/users/1",
+          "host": ["localhost:8011/api"],
+          "path": ["users", "1"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Update User",
+      "request": {
+        "method": "PUT",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"updateduser\", \n  \"role\": \"admin\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8011/api/users/1",
+          "host": ["localhost:8011/api"],
+          "path": ["users", "1"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Delete User",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8011/api/users/1",
+          "host": ["localhost:8011/api"],
+          "path": ["users", "1"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Signup User",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"signupuser\", \n  \"password\": \"securepassword\", \n  \"role\": \"user\", \n  \"levelId\": 2\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8011/api/signup",
+          "host": ["localhost:8011/api"],
+          "path": ["signup"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Login User",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"existinguser\", \n  \"password\": \"userpassword\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8011/api/login",
+          "host": ["localhost:8011/api"],
+          "path": ["login"]
+        }
+      },
+      "response": []
+    }
+  ]
+}
+
+]

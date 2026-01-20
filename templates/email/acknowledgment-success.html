@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Notification Acknowledged - FourO Platform</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+            padding: 50px 40px;
+            text-align: center;
+            animation: slideUp 0.5s ease-out;
+        }
+        
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .icon-container {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 30px;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+            }
+            50% {
+                box-shadow: 0 0 0 20px rgba(16, 185, 129, 0);
+            }
+        }
+        
+        .icon {
+            font-size: 48px;
+            color: white;
+        }
+        
+        h1 {
+            font-size: 32px;
+            color: #1f2937;
+            margin-bottom: 16px;
+            font-weight: 700;
+        }
+        
+        .event-name {
+            font-size: 16px;
+            color: #6b7280;
+            margin-bottom: 24px;
+            padding: 12px 20px;
+            background: #f3f4f6;
+            border-radius: 8px;
+            display: inline-block;
+        }
+        
+        .message {
+            font-size: 16px;
+            color: #4b5563;
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }
+        
+        .timestamp {
+            font-size: 14px;
+            color: #9ca3af;
+            padding: 16px;
+            background: #f9fafb;
+            border-radius: 8px;
+            border-left: 4px solid #10b981;
+        }
+        
+        .footer {
+            margin-top: 32px;
+            padding-top: 24px;
+            border-top: 1px solid #e5e7eb;
+            font-size: 12px;
+            color: #9ca3af;
+        }
+        
+        .already-acknowledged {
+            background: #fef3c7;
+            border-left-color: #f59e0b;
+        }
+        
+        .already-acknowledged .icon-container {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+        
+        @media (max-width: 600px) {
+            .container {
+                padding: 40px 24px;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+            
+            .icon-container {
+                width: 60px;
+                height: 60px;
+            }
+            
+            .icon {
+                font-size: 36px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon-container">
+            <div class="icon">✓</div>
+        </div>
+        
+        <h1>Thank You, {{userName}}!</h1>
+        
+        <div class="event-name">
+            {{eventName}}
+        </div>
+        
+        <p class="message">
+            {{#if alreadyAcknowledged}}
+                This notification was already acknowledged.
+            {{else}}
+                Your notification has been acknowledged successfully. The escalation workflow has been cancelled.
+            {{/if}}
+        </p>
+        
+        <div class="timestamp {{#if alreadyAcknowledged}}already-acknowledged{{/if}}">
+            <strong>Acknowledged:</strong><br>
+            {{acknowledgedAt}}
+        </div>
+        
+        <div class="footer">
+            <p>FourO Platform - Notification System</p>
+            <p style="margin-top: 8px;">You can safely close this window.</p>
+        </div>
+    </div>
+</body>
+</html>
+

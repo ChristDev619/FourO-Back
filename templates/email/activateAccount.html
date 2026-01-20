@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activate Your FourO Account</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333333;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+        .email-container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #ffffff;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            font-size: 16px;
+            opacity: 0.95;
+        }
+        .content {
+            padding: 40px 30px;
+        }
+        .content h2 {
+            color: #333333;
+            font-size: 22px;
+            margin-top: 0;
+            margin-bottom: 20px;
+        }
+        .content p {
+            color: #666666;
+            font-size: 16px;
+            margin: 15px 0;
+        }
+        .user-info {
+            background-color: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin: 25px 0;
+            border-radius: 4px;
+        }
+        .user-info p {
+            margin: 5px 0;
+            color: #333333;
+        }
+        .button-container {
+            text-align: center;
+            margin: 35px 0;
+        }
+        .activate-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #ffffff !important;
+            padding: 16px 50px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 18px;
+            box-shadow: 0 4px 6px rgba(102, 126, 234, 0.3);
+            transition: transform 0.2s;
+        }
+        .activate-button:hover {
+            transform: translateY(-2px);
+        }
+        .highlight-box {
+            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 4px;
+        }
+        .highlight-box h3 {
+            margin: 0 0 10px 0;
+            color: #667eea;
+            font-size: 18px;
+        }
+        .highlight-box p {
+            margin: 5px 0;
+            color: #333333;
+        }
+        .expiry-notice {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 12px;
+            margin: 25px 0;
+            border-radius: 4px;
+        }
+        .expiry-notice p {
+            margin: 0;
+            color: #856404;
+            font-size: 14px;
+        }
+        .alternative-link {
+            background-color: #f8f9fa;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+            word-break: break-all;
+        }
+        .alternative-link p {
+            margin: 5px 0;
+            font-size: 13px;
+            color: #666666;
+        }
+        .alternative-link a {
+            color: #667eea;
+            word-break: break-all;
+        }
+        .security-notice {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            padding: 15px;
+            margin: 25px 0;
+            border-radius: 4px;
+        }
+        .security-notice p {
+            margin: 5px 0;
+            color: #0c5460;
+            font-size: 14px;
+        }
+        .footer {
+            background-color: #f8f9fa;
+            padding: 30px;
+            text-align: center;
+            border-top: 1px solid #e9ecef;
+        }
+        .footer p {
+            margin: 5px 0;
+            color: #6c757d;
+            font-size: 14px;
+        }
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        .divider {
+            height: 1px;
+            background-color: #e9ecef;
+            margin: 30px 0;
+        }
+        .check-icon {
+            color: #28a745;
+            font-size: 20px;
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="header">
+            <h1>🎉 Welcome to FourO Platform</h1>
+            <p>Your account is ready to be activated!</p>
+        </div>
+        
+        <div class="content">
+            <h2>Hello {{firstName}} {{lastName}}! 👋</h2>
+            
+            <p>You've been invited to join <strong>FourO</strong> - your comprehensive manufacturing intelligence platform. We're excited to have you on our team!</p>
+            
+            <div class="user-info">
+                <p><strong>📋 Your Account Details:</strong></p>
+                <p><strong>Username:</strong> {{username}}</p>
+                <p><strong>Email:</strong> {{supportEmail}}</p>
+            </div>
+            
+            <div class="highlight-box">
+                <h3>🔐 Next Step: Set Your Password</h3>
+                <p>To activate your account and ensure security, you need to create your own password. Click the button below to get started:</p>
+            </div>
+            
+            <div class="button-container">
+                <a href="{{activationLink}}" class="activate-button">Activate My Account</a>
+            </div>
+            
+            <div class="expiry-notice">
+                <p><strong>⏰ Important:</strong> This activation link will expire in <strong>{{expiresInHours}} hours</strong>. Please activate your account as soon as possible.</p>
+            </div>
+            
+            <div class="alternative-link">
+                <p><strong>Having trouble with the button?</strong> Copy and paste this link into your browser:</p>
+                <p><a href="{{activationLink}}">{{activationLink}}</a></p>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <h2>🚀 What You'll Get Access To:</h2>
+            <p>Once you activate your account, you'll have full access to:</p>
+            <ul style="color: #666666; line-height: 1.8;">
+                <li><span class="check-icon">✓</span> Real-time production monitoring and dashboards</li>
+                <li><span class="check-icon">✓</span> OEE calculations and performance analytics</li>
+                <li><span class="check-icon">✓</span> Custom reports and data visualizations</li>
+                <li><span class="check-icon">✓</span> Alarm management and notifications</li>
+                <li><span class="check-icon">✓</span> Team collaboration tools</li>
+                <li><span class="check-icon">✓</span> And much more...</li>
+            </ul>
+            
+            <div class="security-notice">
+                <p><strong>🛡️ Security Tip:</strong> Choose a strong password with at least 8 characters, including uppercase, lowercase, numbers, and special characters.</p>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <p><strong>Need Help?</strong></p>
+            <p>If you didn't request this account or received this email by mistake, please contact our support team immediately.</p>
+        </div>
+        
+        <div class="footer">
+            <p><strong>FourO Platform</strong></p>
+            <p>Need help? Contact us at <a href="mailto:{{supportEmail}}">{{supportEmail}}</a></p>
+            <p style="margin-top: 15px; font-size: 12px;">&copy; {{currentYear}} FourO. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
+

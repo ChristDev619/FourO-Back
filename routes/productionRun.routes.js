@@ -1,0 +1,12 @@
+const express = require("express");
+const router = express.Router();
+const productionRunController = require("../controllers/productionRun.controller");
+router.get("/all", productionRunController.getAllProductionRuns);
+router.get("/line/:lineId/running", productionRunController.getRunningProductionRunsByLine);
+router.get("/validate-skus", productionRunController.validateJobSkus);
+router.patch("/:id", productionRunController.updateProductionRun);
+router.post("/:id/split", productionRunController.splitProductionRun);
+router.post("/:programId/create-new-from-running", productionRunController.createNewFromRunning);
+router.delete("/:id", productionRunController.deleteProductionRun);
+// Future: router.get("/paginated", productionRunController.getPaginatedProductionRuns);
+module.exports = router;
