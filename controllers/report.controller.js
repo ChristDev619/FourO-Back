@@ -26,6 +26,7 @@ const {
 const dayjs = require("dayjs");
 const { QueryTypes } = require("sequelize");
 const TagRefs = require("../utils/constants/TagRefs");
+const STATE_CONFIG = require("../utils/constants/StateConfig");
 const { generateAlarmJoinCondition } = require("../utils/alarmUtils");
 const {
     getTagValuesDifference,
@@ -272,6 +273,132 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
     }
 }
 
+// Helper function to get live machine states from TagValues for running jobs
+async function getLiveMachineStates({ job, machineId, sequelize, QueryTypes, Tags, TagValues, Op }) {
+    try {
+        console.log(`\n[LIVE MACHINE STATES] Fetching real-time machine states for job ${job.id}`);
+        console.log(`  Job Start: ${job.actualStartTime}`);
+        console.log(`  Job End: NOW() (job still running)`);
+        console.log(`  Bottleneck Machine ID: ${machineId}`);
+        
+        // Step 1: Get machine state tag for the bottleneck machine
+        const stateTag = await Tags.findOne({
+            where: {
+                taggableId: machineId,
+                taggableType: 'machine',
+                ref: TagRefs.MACHINE_STATE // Machine state tag reference ('mchnst')
+            },
+            attributes: ['id', 'name', 'ref'],
+            raw: true
+        });
+        
+        if (!stateTag) {
+            console.log(`[LIVE MACHINE STATES] No state tag found for machine: ${machineId}`);
+            return [];
+        }
+        
+        console.log(`[LIVE MACHINE STATES] Found state tag: ${stateTag.name} (ID: ${stateTag.id})`);
+        
+        // Step 2: Get all TagValues for this state tag within job timeframe
+        const tagValues = await TagValues.findAll({
+            where: {
+                tagId: stateTag.id,
+                createdAt: {
+                    [Op.gte]: job.actualStartTime,
+                    [Op.lte]: new Date() // Up to NOW()
+                }
+            },
+            order: [['createdAt', 'ASC']],
+            raw: true
+        });
+        
+        if (!tagValues || tagValues.length === 0) {
+            console.log(`[LIVE MACHINE STATES] No tag values found for state tag`);
+            return [];
+        }
+        
+        console.log(`[LIVE MACHINE STATES] Processing ${tagValues.length} state values`);
+        
+        // Step 3: Process tag values to calculate state durations
+        // Use Map for efficient state aggregation
+        const stateAggregations = new Map();
+        let currentState = null;
+        let stateStartTime = null;
+        
+        for (let i = 0; i < tagValues.length; i++) {
+            const currentValue = tagValues[i];
+            const stateCode = parseInt(currentValue.value);
+            
+            // If state changed, close previous state
+            if (currentState !== null && currentState !== stateCode) {
+                const stateEndTime = currentValue.createdAt;
+                const durationMinutes = dayjs(stateEndTime).diff(dayjs(stateStartTime), 'minute', true);
+                
+                // Only include states with duration > 0
+                if (durationMinutes > 0) {
+                    // Use STATE_CONFIG to get state name (same as TagAggregates.controller.js does)
+                    const stateName = STATE_CONFIG.getStateLabel(currentState);
+                    
+                    // Aggregate durations for same state code
+                    if (stateAggregations.has(currentState)) {
+                        const existing = stateAggregations.get(currentState);
+                        existing.total_duration += durationMinutes;
+                    } else {
+                        stateAggregations.set(currentState, {
+                            stateCode: currentState,
+                            stateName: stateName,
+                            total_duration: durationMinutes
+                        });
+                    }
+                }
+            }
+            
+            // Start tracking new state
+            if (currentState !== stateCode) {
+                currentState = stateCode;
+                stateStartTime = currentValue.createdAt;
+            }
+        }
+        
+        // Handle ongoing state (last value to NOW())
+        if (currentState !== null && stateStartTime !== null) {
+            const stateEndTime = new Date(); // NOW()
+            const durationMinutes = dayjs(stateEndTime).diff(dayjs(stateStartTime), 'minute', true);
+            
+            if (durationMinutes > 0) {
+                const stateName = STATE_CONFIG.getStateLabel(currentState);
+                
+                if (stateAggregations.has(currentState)) {
+                    const existing = stateAggregations.get(currentState);
+                    existing.total_duration += durationMinutes;
+                } else {
+                    stateAggregations.set(currentState, {
+                        stateCode: currentState,
+                        stateName: stateName,
+                        total_duration: durationMinutes
+                    });
+                }
+                console.log(`[LIVE MACHINE STATES] ⚙️  ONGOING state: ${stateName} (duration: ${durationMinutes.toFixed(2)} min)`);
+            }
+        }
+        
+        // Convert Map to Array and sort by duration descending
+        const states = Array.from(stateAggregations.values());
+        states.sort((a, b) => b.total_duration - a.total_duration);
+        
+        console.log(`[LIVE MACHINE STATES] Calculated ${states.length} state aggregations:`);
+        states.forEach(state => {
+            console.log(`  - ${state.stateName} (${state.stateCode}): ${state.total_duration.toFixed(2)} minutes`);
+        });
+        
+        return states;
+        
+    } catch (error) {
+        console.error('[LIVE MACHINE STATES] Error fetching live machine states:', error);
+        return [];
+    }
+}
+
 // Helper to extract all report data for a job (and program, line, etc.)
 async function extractJobReportData({ job, program, line, machineIds, bottleneckMachine, Recipie, sequelize, QueryTypes, getTagValuesDifference, TagRefs, Tags, TagValues, Op, formatAlarms, prepareParetoData, prepareWaterfallData, calculateEmsMetrics, calculateManHourMetrics, Meters, Unit, Generator, GeneratorMeter, TariffUsage, Tariff, Sku, volumeOfDiesel, manHours, Location, TariffType, Settings, isLiveMode = false }) {
     // Check application resource type (defaults to 'FourO' for backward compatibility)
@@ -407,9 +534,9 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     const formattedAlarms = formatAlarms(alarms);
 
     // Metrics
-    const { calculateMetrics, calculateTrueEfficiency } = require("./Kpis.controller.js");
+    const { calculateMetrics, calculateTrueEfficiency, calculateVOTProgram } = require("./Kpis.controller.js");
     let metrics = {};
-    let metricsTrueEff = { valueOperatingTime: 0, programDuration: 0, trueEfficiency: 0 };
+    let metricsTrueEff = { valueOperatingTime: 0, programDuration: 0, trueEfficiency: 0, isEstimated: false };
     try {
         const bottleneckMachineId = bottleneckMachine ? bottleneckMachine.id : machineIds[0];
         // Pass netProduction to calculateMetrics so VOT uses netProduction instead of fillerCounter
@@ -418,21 +545,55 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
         // Only calculate true efficiency for completed jobs (not live reports)
         // For live reports, program.endDate is NULL, which causes calculateTrueEfficiency to throw an error
         if (!isLiveMode && program.endDate) {
+            // HISTORICAL: Use actual program dates
             // Pass netProduction to calculateTrueEfficiency so VOT uses netProduction instead of fillerCounter
             metricsTrueEff = await calculateTrueEfficiency(program.id, job.id, line.id, null, netProduction);
             metrics = { ...metrics, ...metricsTrueEff };
-        } else if (isLiveMode) {
-            console.log('[LIVE REPORT] Skipping calculateTrueEfficiency (program.endDate is NULL for running jobs)');
-            // For live reports, use basic metrics without true efficiency calculation
-            metrics = { ...metrics, ...metricsTrueEff }; // Use default values
+        } else if (isLiveMode && program.startDate) {
+            // LIVE: Calculate estimated true efficiency using NOW() as end time
+            console.log('[LIVE REPORT] Calculating estimated True Efficiency using NOW() as end time');
+            
+            try {
+                // Calculate current duration from job start to NOW
+                const currentDuration = dayjs(new Date()).diff(dayjs(job.actualStartTime), 'minute');
+                
+                // Calculate VOT for the current time range
+                const votProgram = await calculateVOTProgram(job.id, line.id, currentDuration, netProduction);
+                
+                // Calculate program duration from program start to NOW
+                const programDuration = dayjs(new Date()).diff(dayjs(program.startDate), 'minute');
+                
+                // Calculate estimated true efficiency
+                const trueEfficiency = programDuration > 0 
+                    ? parseFloat(((votProgram / programDuration) * 100).toFixed(2)) 
+                    : 0;
+                
+                metricsTrueEff = {
+                    valueOperatingTime: votProgram,
+                    programDuration: programDuration,
+                    trueEfficiency: trueEfficiency,
+                    isEstimated: true // Flag to indicate this is estimated
+                };
+                
+                console.log(`[LIVE REPORT] Estimated True Efficiency: ${trueEfficiency}% (VOT: ${votProgram}, Program Duration: ${programDuration})`);
+                
+                metrics = { ...metrics, ...metricsTrueEff };
+            } catch (trueEffError) {
+                console.error('[LIVE REPORT] Error calculating estimated True Efficiency:', trueEffError);
+                // Fall back to default values with estimated flag
+                metricsTrueEff = { valueOperatingTime: 0, programDuration: 0, trueEfficiency: 0, isEstimated: true };
+                metrics = { ...metrics, ...metricsTrueEff };
+            }
         } else {
+            // No program start date available
+            console.log('[LIVE REPORT] Cannot calculate True Efficiency (program.startDate is NULL)');
             metrics = { ...metrics, ...metricsTrueEff };
         }
     } catch (error) {
         console.error('[REPORT] Error calculating metrics:', error);
         metrics = {
             vot: 0, ql: 0, not: 0, udt: 0, got: 0, slt: 0, sl: 0, batchDuration: 0,
-            valueOperatingTime: 0, programDuration: 0, trueEfficiency: 0,
+            valueOperatingTime: 0, programDuration: 0, trueEfficiency: 0, isEstimated: false,
         };
     }
     
@@ -443,31 +604,52 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
         console.log(`[LIVE REPORT] Duration calculated: ${duration} minutes (from start to NOW)`);
     }
 
-    // Pareto (sunburst)
-    const statesQuery = `
-        SELECT 
-        MSA.stateCode,
-        MSA.stateName,
-        SUM(MSA.duration) as total_duration
-        FROM 
-        MachineStateAggregations MSA
-        WHERE 
-        MSA.jobId = :jobId
-        AND MSA.machineId = :bottleneckMachineId
-        GROUP BY 
-        MSA.stateCode,
-        MSA.stateName
-        ORDER BY 
-        total_duration DESC
-    `;
+    // Pareto (sunburst) - Different logic for live vs historical reports
     const bottleneckMachineId = bottleneckMachine ? bottleneckMachine.id : machineIds[0];
-    const statesResults = await sequelize.query(statesQuery, {
-        replacements: {
-            jobId: job.id,
-            bottleneckMachineId: bottleneckMachineId
-        },
-        type: QueryTypes.SELECT,
-    });
+    let statesResults = [];
+
+    if (isLiveMode) {
+        // LIVE MODE: Calculate states from TagValues in real-time
+        console.log('[LIVE REPORT] Fetching live machine states from TagValues...');
+        statesResults = await getLiveMachineStates({ 
+            job, 
+            machineId: bottleneckMachineId,
+            sequelize, 
+            QueryTypes, 
+            Tags, 
+            TagValues, 
+            Op 
+        });
+        console.log(`[LIVE REPORT] Found ${statesResults.length} machine states`);
+    } else {
+        // HISTORICAL MODE: Query MachineStateAggregations (existing behavior)
+        console.log('[HISTORICAL REPORT] Fetching machine states from MachineStateAggregations...');
+        const statesQuery = `
+            SELECT 
+            MSA.stateCode,
+            MSA.stateName,
+            SUM(MSA.duration) as total_duration
+            FROM 
+            MachineStateAggregations MSA
+            WHERE 
+            MSA.jobId = :jobId
+            AND MSA.machineId = :bottleneckMachineId
+            GROUP BY 
+            MSA.stateCode,
+            MSA.stateName
+            ORDER BY 
+            total_duration DESC
+        `;
+        statesResults = await sequelize.query(statesQuery, {
+            replacements: {
+                jobId: job.id,
+                bottleneckMachineId: bottleneckMachineId
+            },
+            type: QueryTypes.SELECT,
+        });
+        console.log(`[HISTORICAL REPORT] Found ${statesResults.length} machine states`);
+    }
+    
     const paretoData = prepareParetoData(statesResults);
 
     // Waterfall
