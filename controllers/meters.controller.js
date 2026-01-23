@@ -77,32 +77,49 @@ exports.getMeterById = async (req, res) => {
 };
   
 exports.updateMeter = async (req, res) => {
+  const transaction = await db.sequelize.transaction(); // Start a transaction
+
   try {
     const { id } = req.params; // Get meter ID from request params
-    const { name } = req.body; // Get new meter name from request body
+    const { name, generators } = req.body; // Get meter name and generators from request body
 
     // Check if the meter exists
-    const meter = await Meters.findByPk(id);
+    const meter = await Meters.findByPk(id, { transaction });
     if (!meter) {
+      await transaction.rollback();
       return res.status(404).send({ message: "Meter not found" });
     }
 
     // Check if another meter with the same name already exists (excluding the current meter)
-    const existingMeter = await Meters.findOne({ where: { name, id: { [Op.ne]: id } } });
+    const existingMeter = await Meters.findOne({ 
+      where: { name, id: { [Op.ne]: id } },
+      transaction 
+    });
     if (existingMeter) {
-      return res.status(400).send({ message: "Meter name already exists" });
+      await transaction.rollback();
+      return res.status(400).send({ message: "exists" });
     }
 
-    // Update the meter
-    const meterUpdated = await meter.update(req.body);
+    // Update the meter basic fields
+    await meter.update(req.body, { transaction });
 
-    if (meterUpdated) { // If the update is successful, Sequelize returns the updated instance
-      res.status(200).send({ message: "Meter updated successfully" });
-    } else {
-      res.status(500).send({ message: "No changes were made to the meter." });
+    // Handle generators relationship if provided
+    if (generators !== undefined) {
+      // Remove all existing generator associations
+      await meter.setGenerators([], { transaction });
+      
+      // Add new generator associations if any
+      if (generators && generators.length > 0) {
+        await meter.addGenerators(generators, { transaction });
+      }
     }
+
+    await transaction.commit(); // Commit the transaction
+
+    res.status(200).send({ message: "Meter updated successfully" });
 
   } catch (error) {
+    await transaction.rollback(); // Rollback transaction in case of error
     console.error("Error updating meter:", error);
     res.status(500).send({ message: "An error occurred while updating the meter." });
   }
