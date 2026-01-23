@@ -9,6 +9,33 @@ exports.getAllTariffTypes = async (req, res) => {
   }
 };
 
+// Get all tariff types with pagination
+exports.getAllTariffTypesPaginated = async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10; // Default 10 items per page
+    const page = parseInt(req.query.page) || 0;    // Default page 0
+
+    const { count, rows } = await TariffType.findAndCountAll({
+      distinct: true,
+      limit,
+      offset: page * limit,
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.status(200).send({
+      total: count,
+      pages: Math.ceil(count / limit),
+      data: rows,
+    });
+  } catch (error) {
+    console.error("Error fetching paginated tariff types:", error);
+    res.status(500).send({ 
+      message: "Error retrieving tariff types.",
+      error: error.message 
+    });
+  }
+};
+
 exports.createTariffType = async (req, res) => {
   try {
     const { name } = req.body;

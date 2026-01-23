@@ -3,6 +3,7 @@ const router = express.Router();
 const TariffTypeController = require('../controllers/TariffTypeController');
 
 router.get('/', TariffTypeController.getAllTariffTypes);
+router.get('/paginated', TariffTypeController.getAllTariffTypesPaginated);
 router.post('/', TariffTypeController.createTariffType);
 router.put('/:id', TariffTypeController.updateTariffType);
 router.delete('/:id', TariffTypeController.deleteTariffType);
