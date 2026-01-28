@@ -312,27 +312,47 @@ exports.getJobsByLineAndDate = async (req, res) => {
     }
 
     try {
-        // Build where clause - by default only return completed jobs (endDate IS NOT NULL)
+        // Build where clause for Program
         const whereClause = {
             lineId,
             startDate: { [Op.gte]: startDate },
         };
 
+        // Build where clause for Job include
+        const jobWhereClause = {};
+
         // If includeRunning is true, include both completed and running jobs
-        // Otherwise, only include completed jobs (endDate IS NOT NULL and endDate <= endDate)
+        // Otherwise, only include completed jobs
         if (includeRunning === 'true' || includeRunning === true) {
-            // Include both completed jobs (endDate <= endDate) and running jobs (endDate IS NULL)
+            // Include programs where:
+            // 1. Program endDate is NULL (running program) OR Program endDate <= endDate (completed program)
+            // 2. AND there exists at least one job with actualEndTime IS NULL (running job) OR actualEndTime <= endDate
             whereClause[Op.or] = [
                 { endDate: { [Op.lte]: endDate } },
                 { endDate: null }
             ];
+            // Include jobs that are running (actualEndTime IS NULL) or completed within date range
+            jobWhereClause[Op.or] = [
+                { actualEndTime: { [Op.lte]: endDate } },
+                { actualEndTime: null }
+            ];
         } else {
-            // Default behavior: only completed jobs (endDate IS NOT NULL and endDate <= endDate)
+            // Default behavior: only completed jobs
+            // Program must have endDate <= endDate
             whereClause.endDate = { [Op.lte]: endDate };
+            // Job must have actualEndTime <= endDate (completed job)
+            jobWhereClause.actualEndTime = { [Op.lte]: endDate };
         }
 
         const programs = await db.Program.findAll({
             where: whereClause,
+            include: [{
+                model: Job,
+                as: 'jobs',
+                required: true,  // INNER JOIN - excludes orphaned programs (programs without jobs)
+                where: jobWhereClause,  // Filter jobs based on actualEndTime
+                attributes: []   // Don't fetch job data, just check existence
+            }],
             order: [["startDate", "ASC"]],
         });
 
@@ -512,6 +532,12 @@ exports.getProgramsByMultipleLines = async (req, res) => {
                 startDate: { [Op.gte]: startDate },
                 endDate: { [Op.lte]: endDate },
             },
+            include: [{
+                model: Job,
+                as: 'jobs',
+                required: true,  // INNER JOIN - excludes orphaned programs (programs without jobs)
+                attributes: []   // Don't fetch job data, just check existence
+            }],
             order: [["startDate", "ASC"]],
         });
 
@@ -549,6 +575,12 @@ exports.getProgramsByLocation = async (req, res) => {
                 startDate: { [db.Sequelize.Op.gte]: startDate },
                 endDate: { [db.Sequelize.Op.lte]: endDate },
             },
+            include: [{
+                model: Job,
+                as: 'jobs',
+                required: true,  // INNER JOIN - excludes orphaned programs (programs without jobs)
+                attributes: []   // Don't fetch job data, just check existence
+            }],
             order: [["startDate", "ASC"]],
         });
 
