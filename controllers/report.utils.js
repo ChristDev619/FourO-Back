@@ -344,16 +344,46 @@ function prepareParetoData(statesResults) {
 }
 
 // Helper: Prepare waterfall chart data
-function prepareWaterfallData(program, job, metrics) {
+function prepareWaterfallData(program, job, metrics, isLiveMode = false) {
     const dayjs = require("dayjs");
     const programStart = dayjs(program?.startDate);
     const programEnd = dayjs(program?.endDate);
     const jobStart = dayjs(job.actualStartTime);
-    const jobEnd = dayjs(job.actualEndTime);
-    const programDuration = programEnd.diff(programStart, "minute");
+    const now = dayjs(new Date());
+    
+    // For live reports: use NOW() as job end time; for historical: use actualEndTime
+    const jobEnd = isLiveMode ? now : dayjs(job.actualEndTime);
+    
+    // Program Duration: For live, calculate from program start to NOW; for historical, use program dates
+    let programDuration;
+    if (isLiveMode) {
+        // Live mode: Calculate from program start to current time
+        programDuration = programStart.isValid() ? Math.max(0, now.diff(programStart, "minute")) : 0;
+    } else {
+        // Historical mode: Use original logic (program end - program start)
+        programDuration = programEnd.diff(programStart, "minute");
+    }
+    
+    // Start Up Time: Same calculation for both modes
     const startUpTime = jobStart.diff(programStart, "minute");
-    const runDownTime = programEnd.diff(jobEnd, "minute");
-    const productionTime = jobEnd.diff(jobStart, "minute");
+    
+    // Run Down Time: For live reports, set to 0 (can't calculate until job ends)
+    // For historical reports, use original calculation
+    let runDownTime;
+    if (isLiveMode) {
+        runDownTime = 0; // Will be calculated when job completes
+    } else {
+        runDownTime = programEnd.diff(jobEnd, "minute");
+    }
+    
+    // Production Time: For live, use start to NOW; for historical, use actual times
+    let productionTime;
+    if (isLiveMode) {
+        productionTime = jobStart.isValid() ? Math.max(0, now.diff(jobStart, "minute")) : 0;
+    } else {
+        productionTime = jobEnd.diff(jobStart, "minute");
+    }
+    
     const waterfallDataArray = [
         { label: "Operating Working Time", value: programDuration },
         { label: "Start Up Time", value: -startUpTime },

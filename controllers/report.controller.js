@@ -653,7 +653,7 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     const paretoData = prepareParetoData(statesResults);
 
     // Waterfall
-    const waterfallData = prepareWaterfallData(program, job, metrics);
+    const waterfallData = prepareWaterfallData(program, job, metrics, isLiveMode);
 
     // Recipe
     let recipe = null;
