@@ -549,21 +549,27 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
             // Pass netProduction to calculateTrueEfficiency so VOT uses netProduction instead of fillerCounter
             metricsTrueEff = await calculateTrueEfficiency(program.id, job.id, line.id, null, netProduction);
             metrics = { ...metrics, ...metricsTrueEff };
-        } else if (isLiveMode && program.startDate) {
-            // LIVE: Calculate estimated true efficiency using NOW() as end time
-            console.log('[LIVE REPORT] Calculating estimated True Efficiency using NOW() as end time');
+        } else if (isLiveMode) {
+            // LIVE: Calculate estimated true efficiency
+            // Use calculateVOTProgram() to match historical calculation method (consistency)
+            // Key difference from Net Efficiency: True Efficiency uses Program Duration (planned time), not Job Duration (actual time)
+            console.log('[LIVE REPORT] Calculating estimated True Efficiency');
             
             try {
-                // Calculate current duration from job start to NOW
-                const currentDuration = dayjs(new Date()).diff(dayjs(job.actualStartTime), 'minute');
+                // Calculate current production time from job start to NOW (for live reports)
+                const productionTime = dayjs(new Date()).diff(dayjs(job.actualStartTime), 'minute');
                 
-                // Calculate VOT for the current time range
-                const votProgram = await calculateVOTProgram(job.id, line.id, currentDuration, netProduction);
+                // Use calculateVOTProgram() to match historical True Efficiency calculation
+                // Note: ProgramDuration parameter is passed but not used in calculation (same as historical)
+                const votProgram = await calculateVOTProgram(job.id, line.id, productionTime, netProduction);
                 
                 // Calculate program duration from program start to NOW
+                // Only use program data, not job data
                 const programDuration = dayjs(new Date()).diff(dayjs(program.startDate), 'minute');
                 
-                // Calculate estimated true efficiency
+                // True Efficiency = (VOT / Program Duration) * 100
+                // Net Efficiency = (VOT / Job Duration) * 100
+                // The difference: True Efficiency uses planned program time, Net Efficiency uses actual job time
                 const trueEfficiency = programDuration > 0 
                     ? parseFloat(((votProgram / programDuration) * 100).toFixed(2)) 
                     : 0;
@@ -575,18 +581,34 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
                     isEstimated: true // Flag to indicate this is estimated
                 };
                 
-                console.log(`[LIVE REPORT] Estimated True Efficiency: ${trueEfficiency}% (VOT: ${votProgram}, Program Duration: ${programDuration})`);
+                // Calculate job duration for comparison (actualStartTime to NOW for live reports)
+                const jobDuration = dayjs(new Date()).diff(dayjs(job.actualStartTime), 'minute');
+                console.log(`[LIVE REPORT] Estimated True Efficiency: ${trueEfficiency}% (VOT: ${votProgram}, Program Duration: ${programDuration} min, Job Duration: ${jobDuration} min)`);
+                console.log(`[LIVE REPORT] Using calculateVOTProgram() to match historical calculation method`);
+                console.log(`[LIVE REPORT] Net Efficiency uses Job Duration, True Efficiency uses Program Duration`);
                 
                 metrics = { ...metrics, ...metricsTrueEff };
             } catch (trueEffError) {
                 console.error('[LIVE REPORT] Error calculating estimated True Efficiency:', trueEffError);
-                // Fall back to default values with estimated flag
-                metricsTrueEff = { valueOperatingTime: 0, programDuration: 0, trueEfficiency: 0, isEstimated: true };
+                // Fall back to using metrics.vot if calculateVOTProgram fails
+                console.warn('[LIVE REPORT] Falling back to metrics.vot from calculateMetrics()');
+                const votProgram = metrics.vot || 0;
+                const programDuration = dayjs(new Date()).diff(dayjs(program.startDate), 'minute');
+                const trueEfficiency = programDuration > 0 
+                    ? parseFloat(((votProgram / programDuration) * 100).toFixed(2)) 
+                    : 0;
+                
+                metricsTrueEff = { 
+                    valueOperatingTime: votProgram, 
+                    programDuration: programDuration, 
+                    trueEfficiency: trueEfficiency, 
+                    isEstimated: true 
+                };
                 metrics = { ...metrics, ...metricsTrueEff };
             }
         } else {
-            // No program start date available
-            console.log('[LIVE REPORT] Cannot calculate True Efficiency (program.startDate is NULL)');
+            // No program start date available (shouldn't happen for live mode, but handle gracefully)
+            console.log('[LIVE REPORT] Cannot calculate True Efficiency (not in live mode or missing data)');
             metrics = { ...metrics, ...metricsTrueEff };
         }
     } catch (error) {
