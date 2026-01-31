@@ -10,9 +10,150 @@ const { fn, col, literal } = require("sequelize");
 const TagRefs = require("../utils/constants/TagRefs");
 
 
+/**
+ * Helper function to check if a machine has started production
+ * Checks if OutputTotal counter has increased since job start
+ * Note: OutputTotal tags can be at machine level OR line level (e.g., Blower, Robopac)
+ */
+async function checkMachineQualification(machineId, job, transaction) {
+    try {
+        // ATTEMPT 1: Find machine's own OutputTotal tag
+        let outputTag = await db.Tags.findOne({
+            where: {
+                taggableType: 'machine',
+                taggableId: machineId,
+                name: { [Op.like]: '%_OutputTotal' }
+            },
+            transaction
+        });
+
+        // ATTEMPT 2: If not found at machine level, check line level
+        // Some machines (like Blower, Robopac) have OutputTotal at line level
+        if (!outputTag) {
+            outputTag = await db.Tags.findOne({
+                where: {
+                    taggableType: 'line',
+                    taggableId: job.lineId,
+                    name: { [Op.like]: '%_OutputTotal' }
+                },
+                transaction
+            });
+
+            if (outputTag) {
+                console.log(`📍 Found OutputTotal tag at LINE level for machine ${machineId} (tag: ${outputTag.name})`);
+            }
+        } else {
+            console.log(`📍 Found OutputTotal tag at MACHINE level for machine ${machineId} (tag: ${outputTag.name})`);
+        }
+
+        if (!outputTag) {
+            console.log(`⚠️  No OutputTotal tag found for machine ${machineId} (checked both machine and line level)`);
+            return false;
+        }
+
+        // Get first OutputTotal value at or after job start
+        const firstValue = await db.TagValues.findOne({
+            where: {
+                tagId: outputTag.id,
+                createdAt: { [Op.gte]: job.actualStartTime }
+            },
+            order: [['createdAt', 'ASC']],
+            transaction
+        });
+
+        if (!firstValue) {
+            console.log(`⚠️  No OutputTotal values found for machine ${machineId} after job start`);
+            return false;
+        }
+
+        // Get second OutputTotal value (first change after start)
+        const secondValue = await db.TagValues.findOne({
+            where: {
+                tagId: outputTag.id,
+                createdAt: { [Op.gt]: firstValue.createdAt }
+            },
+            order: [['createdAt', 'ASC']],
+            transaction
+        });
+
+        if (!secondValue) {
+            console.log(`⚠️  No OutputTotal change detected for machine ${machineId}`);
+            return false;
+        }
+
+        const outputDiff = parseFloat(secondValue.value) - parseFloat(firstValue.value);
+        const isQualified = outputDiff > 0;
+
+        console.log(`${isQualified ? '✅' : '❌'} Machine ${machineId} qualification: OutputTotal ${firstValue.value} → ${secondValue.value} (diff: ${outputDiff})`);
+
+        return isQualified;
+    } catch (error) {
+        console.error(`Error checking qualification for machine ${machineId}:`, error);
+        return false;
+    }
+}
+
+
+/**
+ * Helper function to detect if two alarms overlap
+ */
+function alarmsOverlap(alarm1, alarm2) {
+    return alarm1.startTime < alarm2.endTime && alarm2.startTime < alarm1.endTime;
+}
+
+/**
+ * Helper function to group alarms into sequences (overlapping alarms)
+ */
+function groupAlarmsIntoSequences(allAlarms) {
+    if (allAlarms.length === 0) return [];
+
+    // Sort by start time
+    const sorted = [...allAlarms].sort((a, b) => a.startTime - b.startTime);
+
+    const sequences = [];
+    let currentSequence = [sorted[0]];
+
+    for (let i = 1; i < sorted.length; i++) {
+        const alarm = sorted[i];
+        const lastAlarmInSequence = currentSequence[currentSequence.length - 1];
+
+        if (alarmsOverlap(lastAlarmInSequence, alarm)) {
+            // Overlapping - add to current sequence
+            currentSequence.push(alarm);
+        } else {
+            // No overlap - save current sequence and start new one
+            sequences.push(currentSequence);
+            currentSequence = [alarm];
+        }
+    }
+
+    // Don't forget the last sequence
+    if (currentSequence.length > 0) {
+        sequences.push(currentSequence);
+    }
+
+    return sequences;
+}
+
+/**
+ * Helper function to select winner from a sequence (earliest start time)
+ */
+function selectSequenceWinner(sequence) {
+    if (sequence.length === 0) return null;
+    if (sequence.length === 1) return sequence[0];
+
+    // Return alarm with earliest start time
+    return sequence.reduce((earliest, alarm) => {
+        return alarm.startTime < earliest.startTime ? alarm : earliest;
+    });
+}
 
 async function aggregateAlarms(specificJobId = null, transaction = null) {
     try {
+        console.log('\n========================================');
+        console.log('🚀 ALARM AGGREGATION WITH 5 PHASES STARTED');
+        console.log('========================================\n');
+
         // If specificJobId is provided, process only that job; otherwise process all unprocessed jobs
         let jobs;
 
@@ -52,6 +193,8 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
         }
 
         for (const job of jobs) {
+            console.log(`\n📋 Processing Job ${job.id} (${job.actualStartTime} - ${job.actualEndTime})`);
+
             // Use JobLineMachineTag to get related data
             const machineTagQueryOptions = {
                 where: {
@@ -74,7 +217,41 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
 
             const machineAlarmTags = await db.JobLineMachineTag.findAll(machineTagQueryOptions);
 
+            // ============================================================
+            // PHASE 1: MACHINE QUALIFICATION
+            // ============================================================
+            console.log('\n--- PHASE 1: Machine Qualification Check ---');
+            
+            const machineQualified = {}; // { machineId: boolean }
+            
+            // Check qualification for each machine
             for (const machineTag of machineAlarmTags) {
+                const isQualified = await checkMachineQualification(machineTag.machineId, job, transaction);
+                machineQualified[machineTag.machineId] = isQualified;
+            }
+
+            console.log(`\nMachine Qualification Summary:`);
+            Object.entries(machineQualified).forEach(([machineId, qualified]) => {
+                console.log(`  Machine ${machineId}: ${qualified ? '✅ QUALIFIED' : '❌ NOT QUALIFIED'}`);
+            });
+
+            // ============================================================
+            // PHASE 2: COLLECT QUALIFYING ALARMS (>= 10 min)
+            // ============================================================
+            console.log('\n--- PHASE 2: Collect Qualifying Alarms (>= 10 min) ---\n');
+
+            const allAlarms = []; // Collect all qualifying alarms here
+
+            // Process alarms for each machine
+            for (const machineTag of machineAlarmTags) {
+                // Skip non-qualified machines
+                if (!machineQualified[machineTag.machineId]) {
+                    console.log(`⏩ Skipping machine ${machineTag.machineName} (not qualified)`);
+                    continue;
+                }
+
+                console.log(`\n🔍 Processing alarms for ${machineTag.machineName} (machineId: ${machineTag.machineId})`);
+
                 // Get tag values between job start and end time
                 const queryOptions = {
                     where: {
@@ -89,7 +266,10 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
 
                 const tagValues = await TagValues.findAll(queryOptions);
 
-                if (tagValues.length < 2) continue; // Skip if not enough values for a sequence
+                if (tagValues.length < 2) {
+                    console.log(`  ⚠️  Not enough tag values (${tagValues.length})`);
+                    continue;
+                }
 
                 // Process alarm sequences
                 let currentAlarm = null;
@@ -117,43 +297,26 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
                         const endDate = new Date(nextValue.createdAt);
                         const durationMinutes = (endDate - startDate) / (1000 * 60);
 
-                        // Skip preform feeder alarms that run for more than 30 minutes
-                        const isPreformFeeder = machineTag.machineName && 
-                            (machineTag.machineName.toLowerCase().includes('preformfeeder') || 
-                             machineTag.machineName.toLowerCase().includes('preform-feeder'));
-                        const isLongRunningAlarm = durationMinutes > 30;
-                        
-                        if (isPreformFeeder && isLongRunningAlarm) {
-                            console.log(`Skipping preform feeder alarm: ${machineTag.machineName} - Duration: ${durationMinutes.toFixed(2)} minutes`);
-                            // Reset tracker if next value is 0, otherwise start new sequence
-                            if (nextValue.value === "0") {
-                                currentAlarm = null;
-                                alarmStartTime = null;
-                            } else {
-                                currentAlarm = nextValue.value;
-                                alarmStartTime = nextValue.createdAt;
-                            }
-                            continue;
+                        // Only keep alarms >= 10 minutes
+                        if (durationMinutes >= 10) {
+                            console.log(`  ✅ Alarm #${currentAlarm}: ${durationMinutes.toFixed(2)} min (>= 10 min, added to collection)`);
+
+                            allAlarms.push({
+                                jobId: job.id,
+                                machineId: machineTag.machineId,
+                                machineName: machineTag.machineName,
+                                tagId: machineTag.tagId,
+                                tagName: machineTag.tagName,
+                                lineId: machineTag.lineId,
+                                lineName: machineTag.lineName,
+                                alarmCode: currentAlarm,
+                                startTime: new Date(alarmStartTime),
+                                endTime: new Date(nextValue.createdAt),
+                                duration: durationMinutes,
+                            });
+                        } else {
+                            console.log(`  ⏩ Alarm #${currentAlarm}: ${durationMinutes.toFixed(2)} min (< 10 min, skipped)`);
                         }
-
-                        const createOptions = {
-                            jobId: job.id,
-                            machineId: machineTag.machineId,
-                            machineName: machineTag.machineName,
-                            tagId: machineTag.tagId,
-                            tagName: machineTag.tagName,
-                            lineId: machineTag.lineId,
-                            lineName: machineTag.lineName,
-                            alarmCode: currentAlarm,
-                            alarmStartDateTime: alarmStartTime,
-                            alarmEndDateTime: nextValue.createdAt,
-                            duration: durationMinutes,
-                            processed: true,
-                        };
-                        const createQueryOptions = {};
-                        if (transaction) createQueryOptions.transaction = transaction;
-
-                        await db.AlarmAggregation.create(createOptions, createQueryOptions);
 
                         // Reset tracker if next value is 0, otherwise start new sequence
                         if (nextValue.value === "0") {
@@ -174,16 +337,11 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
                     const endDate = new Date(lastValue.createdAt);
                     const durationMinutes = (endDate - startDate) / (1000 * 60);
 
-                    // Skip preform feeder alarms that run for more than 30 minutes
-                    const isPreformFeeder = machineTag.machineName && 
-                        (machineTag.machineName.toLowerCase().includes('preformfeeder') || 
-                         machineTag.machineName.toLowerCase().includes('preform-feeder'));
-                    const isLongRunningAlarm = durationMinutes > 30;
-                    
-                    if (isPreformFeeder && isLongRunningAlarm) {
-                        console.log(`Skipping preform feeder alarm (last sequence): ${machineTag.machineName} - Duration: ${durationMinutes.toFixed(2)} minutes`);
-                    } else {
-                        const createOptions = {
+                    // Only keep alarms >= 10 minutes
+                    if (durationMinutes >= 10) {
+                        console.log(`  ✅ Alarm #${currentAlarm} (last): ${durationMinutes.toFixed(2)} min (>= 10 min, added to collection)`);
+
+                        allAlarms.push({
                             jobId: job.id,
                             machineId: machineTag.machineId,
                             machineName: machineTag.machineName,
@@ -192,35 +350,106 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
                             lineId: machineTag.lineId,
                             lineName: machineTag.lineName,
                             alarmCode: currentAlarm,
-                            alarmStartDateTime: alarmStartTime,
-                            alarmEndDateTime: lastValue.createdAt,
+                            startTime: new Date(alarmStartTime),
+                            endTime: new Date(lastValue.createdAt),
                             duration: durationMinutes,
-                            processed: true,
-                        };
-                        const createQueryOptions = {};
-                        if (transaction) createQueryOptions.transaction = transaction;
-
-                        await db.AlarmAggregation.create(createOptions, createQueryOptions);
+                        });
+                    } else {
+                        console.log(`  ⏩ Alarm #${currentAlarm} (last): ${durationMinutes.toFixed(2)} min (< 10 min, skipped)`);
                     }
                 }
             }
+
+            console.log(`\n📊 Total qualifying alarms collected: ${allAlarms.length}`);
+
+            // ============================================================
+            // PHASE 3: GROUP INTO SEQUENCES (Overlapping Alarms)
+            // ============================================================
+            console.log('\n--- PHASE 3: Group Overlapping Alarms into Sequences ---');
+            
+            const sequences = groupAlarmsIntoSequences(allAlarms);
+            
+            console.log(`📦 Total sequences: ${sequences.length}`);
+            sequences.forEach((seq, idx) => {
+                console.log(`\nSequence ${idx + 1}: ${seq.length} alarm(s)`);
+                seq.forEach(alarm => {
+                    console.log(`  - ${alarm.machineName} Alarm #${alarm.alarmCode}: ${alarm.startTime.toISOString()} - ${alarm.endTime.toISOString()} (${alarm.duration.toFixed(2)} min)`);
+                });
+            });
+
+            // ============================================================
+            // PHASE 4: SELECT WINNER FROM EACH SEQUENCE
+            // ============================================================
+            console.log('\n--- PHASE 4: Select Winner (Earliest Start) from Each Sequence ---');
+            
+            const winnersToRecord = [];
+            
+            sequences.forEach((sequence, idx) => {
+                const winner = selectSequenceWinner(sequence);
+                if (winner) {
+                    winnersToRecord.push(winner);
+                    console.log(`\n🏆 Sequence ${idx + 1} Winner: ${winner.machineName} Alarm #${winner.alarmCode}`);
+                    console.log(`   Start: ${winner.startTime.toISOString()}, Duration: ${winner.duration.toFixed(2)} min`);
+                }
+            });
+
+            console.log(`\n📝 Total alarms to record: ${winnersToRecord.length}`);
+
+            // ============================================================
+            // PHASE 5: CREATE ALARM AGGREGATION RECORDS
+            // ============================================================
+            console.log('\n--- PHASE 5: Create AlarmAggregation Records ---');
+            
+            for (const alarm of winnersToRecord) {
+                const createOptions = {
+                    jobId: alarm.jobId,
+                    machineId: alarm.machineId,
+                    machineName: alarm.machineName,
+                    tagId: alarm.tagId,
+                    tagName: alarm.tagName,
+                    lineId: alarm.lineId,
+                    lineName: alarm.lineName,
+                    alarmCode: alarm.alarmCode,
+                    alarmStartDateTime: alarm.startTime,
+                    alarmEndDateTime: alarm.endTime,
+                    duration: alarm.duration,
+                    processed: true,
+                };
+                
+                const createQueryOptions = {};
+                if (transaction) createQueryOptions.transaction = transaction;
+
+                await db.AlarmAggregation.create(createOptions, createQueryOptions);
+                
+                console.log(`✅ Created: ${alarm.machineName} Alarm #${alarm.alarmCode} (${alarm.duration.toFixed(2)} min)`);
+            }
+
+            console.log(`\n✅ Job ${job.id} alarm aggregation completed!`);
         }
 
-        console.log("Alarm aggregation completed successfully");
+        console.log('\n========================================');
+        console.log('✅ ALARM AGGREGATION COMPLETED SUCCESSFULLY');
+        console.log('========================================\n');
     } catch (error) {
+        console.error('\n========================================');
+        console.error('❌ ERROR IN ALARM AGGREGATION');
+        console.error('========================================');
         console.error("Error aggregating alarms:", error);
+        console.error('Stack trace:', error.stack);
+        console.error('========================================\n');
+        throw error;
     }
 }
 
-async function aggregateMachineStates(specificJobId = null, transaction = null) {
-    // Use provided transaction or create a new one
-    let localTransaction = transaction;
-    if (!localTransaction) {
-        localTransaction = await sequelize.transaction();
-    }
 
+async function aggregateMachineStates(specificJobId = null, transaction = null) {
+    let localTransaction = transaction;
     try {
-        // If specificJobId is provided, process only that job; otherwise process all unprocessed jobs
+        // If no transaction provided, create a new one
+        if (!transaction) {
+            localTransaction = await sequelize.transaction();
+        }
+
         let jobs;
 
         if (specificJobId) {
@@ -229,7 +458,7 @@ async function aggregateMachineStates(specificJobId = null, transaction = null) 
                 where: {
                     id: specificJobId,
                     actualStartTime: { [Op.not]: null },
-                    actualEndTime: { [Op.not]: null },
+                    actualEndTime: { [Op.not]: null }
                 },
                 include: [{
                     model: db.Line,
