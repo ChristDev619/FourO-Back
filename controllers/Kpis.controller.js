@@ -216,14 +216,7 @@ async function calculateVOT(jobId, lineId, netProduction = null) {
   // Use netProduction if provided, otherwise fallback to fetchProductCountUntil (fillerCounter) for backward compatibility
   const productCount = netProduction !== null ? netProduction : await fetchProductCountUntil(lineId, jobId);
   const designSpeed = await fetchDesignSpeed(lineId, jobId);
-  console.log(`\n========== VOT CALCULATION ==========`);
-  console.log(`JobId: ${jobId}, LineId: ${lineId}`);
-  console.log(`Product Count (${netProduction !== null ? 'netProduction' : 'fillerCounter'}): ${productCount} bottles`);
-  console.log(`Design Speed: ${designSpeed} bottles/min`);
-  console.log(`Design Speed (per hour): ${designSpeed * 60} bottles/hour`);
   const vot = designSpeed ? productCount / (designSpeed / 60) : 0;
-  console.log(`VOT Calculation: ${productCount} / (${designSpeed} / 60) = ${vot} minutes`);
-  console.log(`========== VOT CALCULATION END ==========\n`);
   return vot;
 }
 
@@ -237,12 +230,10 @@ async function calculateVOTProgram(jobId, lineId, ProgramDuration, netProduction
 async function calculateQL(lineId, jobId) {
     const lostValue = await fetchLostValue(lineId, jobId);
     const productCount = await fetchProductCountUntil(lineId, jobId);
-    
     // Handle division by zero case (no production)
     if (productCount === 0) {
         return 0; // No production means no quality loss
     }
-    
     return (lostValue / productCount) * 100;
 }
 
