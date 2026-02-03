@@ -194,7 +194,6 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
 
             let totalAlarmsFound = 0;
             let totalAlarmsLessThan10Min = 0;
-            let totalAlarmsPreformFeeder = 0;
             let totalAlarmsSaved = 0;
 
             for (const machineTag of machineAlarmTags) {
@@ -267,27 +266,6 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
                         console.log(`      ⏹️  Alarm #${currentAlarm} ENDED at ${nextValue.createdAt}`);
                         console.log(`      ⏱️  Duration: ${durationMinutes.toFixed(2)} minutes`);
 
-                        // Skip preform feeder alarms that run for more than 30 minutes
-                        const isPreformFeeder = machineTag.machineName &&
-                            (machineTag.machineName.toLowerCase().includes('preformfeeder') ||
-                                machineTag.machineName.toLowerCase().includes('preform-feeder'));
-                        const isLongRunningAlarm = durationMinutes > 30;
-
-                        if (isPreformFeeder && isLongRunningAlarm) {
-                            totalAlarmsPreformFeeder++;
-                            console.log(`      ❌ DISMISSED: Preform feeder alarm >30 min (${durationMinutes.toFixed(2)} min)`);
-                            // Reset tracker if next value is 0, otherwise start new sequence
-                            if (nextValue.value === "0") {
-                                currentAlarm = null;
-                                alarmStartTime = null;
-                            } else {
-                                currentAlarm = nextValue.value;
-                                alarmStartTime = nextValue.createdAt;
-                                console.log(`\n      🚨 Alarm #${currentAlarm} STARTED at ${alarmStartTime}`);
-                            }
-                            continue;
-                        }
-
                         // Only save alarms >= 10 minutes
                         if (durationMinutes >= 10) {
                             totalAlarmsSaved++;
@@ -342,16 +320,7 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
                     console.log(`      ⏹️  Alarm #${currentAlarm} ENDED at ${lastValue.createdAt} (LAST SEQUENCE)`);
                     console.log(`      ⏱️  Duration: ${durationMinutes.toFixed(2)} minutes`);
 
-                    // Skip preform feeder alarms that run for more than 30 minutes
-                    const isPreformFeeder = machineTag.machineName &&
-                        (machineTag.machineName.toLowerCase().includes('preformfeeder') ||
-                            machineTag.machineName.toLowerCase().includes('preform-feeder'));
-                    const isLongRunningAlarm = durationMinutes > 30;
-
-                    if (isPreformFeeder && isLongRunningAlarm) {
-                        totalAlarmsPreformFeeder++;
-                        console.log(`      ❌ DISMISSED: Preform feeder alarm >30 min (${durationMinutes.toFixed(2)} min)`);
-                    } else if (durationMinutes >= 10) {
+                    if (durationMinutes >= 10) {
                         totalAlarmsSaved++;
                         console.log(`      ✅ SAVED: Alarm meets criteria (>= 10 min)`);
 
@@ -388,7 +357,6 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
             console.log(`Total alarms found: ${totalAlarmsFound}`);
             console.log(`  ✅ Saved (>= 10 min): ${totalAlarmsSaved}`);
             console.log(`  ❌ Dismissed (< 10 min): ${totalAlarmsLessThan10Min}`);
-            console.log(`  ❌ Dismissed (Preform feeder >30 min): ${totalAlarmsPreformFeeder}`);
             console.log('========================================\n');
             console.log(`✅ Job ${job.id} alarm aggregation completed!`);
         }
