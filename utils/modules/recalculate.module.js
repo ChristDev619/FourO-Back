@@ -9,6 +9,7 @@ const { JobNotFoundError } = require("../errors");
 
 const {
   aggregateAlarms,
+  aggregateAlarmsSQL,
   aggregateMachineStates
 } = require("../../controllers/TagAggregates.controller");
 
@@ -83,8 +84,8 @@ try {
   await AlarmAggregation.destroy({ where: { jobId }, transaction });
   await MachineStateAggregation.destroy({ where: { jobId }, transaction });
 
-  // Step 3: Recreate aggregations
-  await aggregateAlarms(jobId, transaction);
+  // Step 3: Recreate aggregations (using new SQL-based function)
+  await aggregateAlarmsSQL(jobId, transaction);
   
   // Notify alarm aggregation completion
   try {
