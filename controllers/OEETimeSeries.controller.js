@@ -569,17 +569,9 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
             // CASE_COUNT: Calculate cases, then multiply by containers per pack
             caseCount = lastSeenValueForMinute - batchStartValue;
             currentValue = caseCount * numberOfContainersPerPack;
-            
-            console.log(`\n[${minuteLabel}] ${minute.format('YYYY-MM-DD HH:mm:ss')}`);
-            console.log(`  Case Count: ${lastSeenValueForMinute} - ${batchStartValue} = ${caseCount}`);
-            console.log(`  Bottle Count (currentValue): ${currentValue} (${caseCount} cases × ${numberOfContainersPerPack})`);
           } else if (productionCounterType === 'bc') {
             // BOTTLE_COUNT: Use directly (already in bottles)
             currentValue = lastSeenValueForMinute - batchStartValue;
-            
-            console.log(`\n[${minuteLabel}] ${minute.format('YYYY-MM-DD HH:mm:ss')}`);
-            console.log(`  Bottle Count: ${lastSeenValueForMinute} - ${batchStartValue} = ${currentValue}`);
-            console.log(`  Bottle Count (currentValue): ${currentValue} (direct)`);
           }
           
           // Validation checks
