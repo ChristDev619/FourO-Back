@@ -189,18 +189,19 @@ async function processNotificationJob(job) {
 
 /**
  * Initialize Duplicate Job Monitor
- * Schedules daily check at 8:00 AM UTC
+ * Schedules daily check at 10:00 AM UTC (12:00 PM Beirut time)
  */
 function initializeDuplicateJobMonitor() {
     try {
         const duplicateJobMonitor = getDuplicateJobMonitor();
         
-        // Schedule cron job: "0 8 * * *" = Every day at 8:00 AM UTC
+        // Schedule cron job: "0 10 * * *" = Every day at 10:00 AM UTC
+        // Equivalent to 12:00 PM (noon) Beirut time (UTC+2 standard time)
         // Format: minute hour day month dayOfWeek
-        const cronSchedule = '0 8 * * *';
+        const cronSchedule = '0 10 * * *';
         
         cron.schedule(cronSchedule, async () => {
-            logger.info('[DuplicateJobMonitor] 🕐 Triggered scheduled check at 8:00 AM UTC');
+            logger.info('[DuplicateJobMonitor] 🕐 Triggered scheduled check at 10:00 AM UTC (12:00 PM Beirut)');
             try {
                 await duplicateJobMonitor.runDailyCheck();
             } catch (error) {
@@ -210,11 +211,11 @@ function initializeDuplicateJobMonitor() {
                 });
             }
         }, {
-            timezone: 'UTC' // Ensure it runs at 8 AM UTC
+            timezone: 'UTC' // Always schedule in UTC for consistency
         });
         
-        logger.info('[DuplicateJobMonitor] ✅ Scheduled daily check at 8:00 AM UTC');
-        console.log('✅ Duplicate Job Monitor scheduled: Daily at 8:00 AM UTC');
+        logger.info('[DuplicateJobMonitor] ✅ Scheduled daily check at 10:00 AM UTC (12:00 PM Beirut)');
+        console.log('✅ Duplicate Job Monitor scheduled: Daily at 10:00 AM UTC (12:00 PM Beirut time)');
         
     } catch (error) {
         logger.error('[DuplicateJobMonitor] ❌ Failed to initialize scheduler', {

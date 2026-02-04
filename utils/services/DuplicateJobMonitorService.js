@@ -18,7 +18,7 @@ const RECIPIENTS = [
  * Sends daily email alerts when duplicates are detected
  * 
  * Purpose: Detect when bulk operations create multiple jobs for the same program
- * Schedule: Runs daily at 8:00 AM UTC
+ * Schedule: Runs daily at 10:00 AM UTC (12:00 PM Beirut time)
  */
 class DuplicateJobMonitorService {
   constructor() {
@@ -209,7 +209,7 @@ class DuplicateJobMonitorService {
           <p>
             <strong>Environment:</strong> ${process.env.NODE_ENV || 'development'}<br>
             <strong>Host:</strong> ${process.env.HOSTNAME || require('os').hostname()}<br>
-            <strong>Scheduled Check:</strong> Daily at 8:00 AM UTC
+            <strong>Scheduled Check:</strong> Daily at 10:00 AM UTC (12:00 PM Beirut time)
           </p>
         </div>
       </div>
@@ -258,7 +258,7 @@ class DuplicateJobMonitorService {
     const startTime = Date.now();
 
     try {
-      logger.info('[DuplicateJobMonitor] 🕐 Starting scheduled daily check at 8:00 AM UTC');
+      logger.info('[DuplicateJobMonitor] 🕐 Starting scheduled daily check at 10:00 AM UTC (12:00 PM Beirut)');
 
       const duplicates = await this.checkDuplicateJobs();
 
