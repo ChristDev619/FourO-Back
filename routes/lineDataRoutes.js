@@ -11,6 +11,10 @@ router.get('/active', lineDataController.getActiveLineData);
 // Get paginated line data
 router.get('/getAll/paginated', lineDataController.getAllLineDataPaginated);
 
+// Get True Efficiency for Planning (LineData module)
+// Must be BEFORE /:id to avoid route conflict
+router.get('/true-efficiency', lineDataController.getTrueEfficiencyForPlanning);
+
 // Create new line data
 router.post('/', lineDataController.createLineData);
 

@@ -1,5 +1,8 @@
 const db = require("../dbInit");
-const { LineData, Op } = db;
+const { LineData, Op, Job } = db;
+const { calculateTrueEfficiency } = require('./Kpis.controller');
+const { calculateAggregatedTrueEfficiency } = require('../utils/trueEfficiencyAggregator');
+const dayjs = require('dayjs');
 
 exports.createLineData = async (req, res) => {
   try {
@@ -190,6 +193,136 @@ exports.getAllLineDataPaginated = async (req, res) => {
     res.status(500).send({
       message: "Error fetching paginated line data",
       error: error.message,
+    });
+  }
+};
+
+/**
+ * ========================================
+ * GET TRUE EFFICIENCY FOR PLANNING MODULE
+ * ========================================
+ * 
+ * Calculates aggregated True Efficiency for a recipe-line combination in a specific year.
+ * 
+ * Reuses the EXACT same logic as date range reports:
+ * - Formula: (Σ VOT / Σ Program Duration) × 100
+ * - Weighted by program duration (longer programs have more impact)
+ * 
+ * GET /api/line-data/true-efficiency?recipeId=1&lineId=2&year=2025
+ * 
+ * Query Parameters:
+ * - recipeId: Recipe ID (required)
+ * - lineId: Line ID (required)
+ * - year: Year to analyze (e.g., 2025) (required)
+ * 
+ * Response:
+ * {
+ *   success: true,
+ *   data: {
+ *     recipeId: 1,
+ *     lineId: 2,
+ *     year: 2025,
+ *     trueEfficiency: 54.32,
+ *     jobCount: 15,
+ *     totalVOT: 12345.67,
+ *     totalProgramDuration: 22723.00,
+ *     message: "Calculated from 15 production runs in 2025"
+ *   }
+ * }
+ */
+exports.getTrueEfficiencyForPlanning = async (req, res) => {
+  try {
+    const { recipeId, lineId, year } = req.query;
+    
+    // Validation
+    if (!recipeId || !lineId || !year) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: recipeId, lineId, and year are required',
+        example: '/api/line-data/true-efficiency?recipeId=1&lineId=2&year=2025'
+      });
+    }
+
+    const parsedRecipeId = parseInt(recipeId);
+    const parsedLineId = parseInt(lineId);
+    const parsedYear = parseInt(year);
+
+    // Validate parsed values
+    if (isNaN(parsedRecipeId) || isNaN(parsedLineId) || isNaN(parsedYear)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid parameter format: recipeId, lineId, and year must be valid integers'
+      });
+    }
+
+    console.log(`[TRUE EFFICIENCY] Calculating for recipe ${parsedRecipeId}, line ${parsedLineId}, year ${parsedYear}`);
+
+    // Get all completed jobs for this recipe-line combination in the specified year
+    const jobs = await Job.findAll({
+      where: {
+        recipeId: parsedRecipeId,
+        lineId: parsedLineId,
+        actualEndTime: { [Op.not]: null }, // Only completed jobs
+        actualStartTime: {
+          [Op.between]: [
+            dayjs(`${parsedYear}-01-01`).startOf('year').toDate(),
+            dayjs(`${parsedYear}-12-31`).endOf('year').toDate()
+          ]
+        }
+      },
+      order: [['actualStartTime', 'DESC']],
+      attributes: ['id', 'programId', 'lineId', 'recipeId', 'actualStartTime', 'actualEndTime', 'jobName']
+    });
+
+    console.log(`[TRUE EFFICIENCY] Found ${jobs.length} completed jobs`);
+
+    if (jobs.length === 0) {
+      // No historical data - return 0 with informative message
+      console.log(`[TRUE EFFICIENCY] No historical data found`);
+      return res.status(200).json({
+        success: true,
+        data: {
+          recipeId: parsedRecipeId,
+          lineId: parsedLineId,
+          year: parsedYear,
+          trueEfficiency: 0,
+          jobCount: 0,
+          totalVOT: 0,
+          totalProgramDuration: 0,
+          message: `No historical production data available for this recipe-line combination in ${parsedYear}`
+        }
+      });
+    }
+
+    // Calculate aggregated true efficiency using shared utility
+    // This uses the EXACT same logic as date range reports (report.controller.js)
+    console.log(`[TRUE EFFICIENCY] Calculating aggregated efficiency...`);
+    const result = await calculateAggregatedTrueEfficiency(jobs, calculateTrueEfficiency);
+
+    console.log(`[TRUE EFFICIENCY] Result: ${result.trueEfficiency}% (${result.jobCount} successful, ${result.failedJobs} failed)`);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        recipeId: parsedRecipeId,
+        lineId: parsedLineId,
+        year: parsedYear,
+        trueEfficiency: result.trueEfficiency,
+        jobCount: result.jobCount,
+        totalVOT: result.totalVOT,
+        totalProgramDuration: result.totalProgramDuration,
+        failedJobs: result.failedJobs,
+        message: result.jobCount > 0 
+          ? `Calculated from ${result.jobCount} production run${result.jobCount > 1 ? 's' : ''} in ${parsedYear}${result.failedJobs > 0 ? ` (${result.failedJobs} job${result.failedJobs > 1 ? 's' : ''} excluded due to calculation errors)` : ''}`
+          : `No valid production data available for ${parsedYear}`
+      }
+    });
+  } catch (error) {
+    console.error('[TRUE EFFICIENCY] Error calculating true efficiency for planning:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to calculate true efficiency',
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
