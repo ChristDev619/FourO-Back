@@ -277,17 +277,6 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
     // Get design speed using job's SKU (most reliable method)
     const designSpeedDB = await getDesignSpeedForJob(job, lineId);
 
-    // Log initial setup for debugging
-    console.log(`\n=== OEE CURVE CALCULATION START ===`);
-    console.log(`Job ID: ${job?.id}`);
-    console.log(`Job SKU ID: ${job.skuId || 'N/A'}`);
-    console.log(`Line ID: ${lineId}`);
-    console.log(`Machine ID: ${machineId}`);
-    console.log(`Design Speed: ${designSpeedDB} bottles/min`);
-    if (designSpeedDB <= 0) {
-      console.warn(`⚠️  WARNING: Design Speed is ${designSpeedDB} - this will cause division by zero!`);
-    }
-
     if (!job) throw new Error("Job not found");
 
     const jobStart = dayjs.utc(job.actualStartTime);
@@ -319,11 +308,9 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
       if (tag) {
         cache.tags[tagCacheKey] = tag;
         productionCounterType = 'csct';
-        console.log(`✓ OEE Curve [Line ${lineId}]: Using CASE_COUNT (csct) tag`);
       }
     } else {
       productionCounterType = 'csct';
-      console.log(`✓ OEE Curve [Line ${lineId}]: Using cached CASE_COUNT (csct) tag`);
     }
     
     // ATTEMPT 2: Fallback to BOTTLE_COUNT if CASE_COUNT not found (e.g., Bardi lines)
@@ -338,11 +325,9 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
         if (tag) {
           cache.tags[tagCacheKey] = tag;
           productionCounterType = 'bc';
-          console.log(`✓ OEE Curve [Line ${lineId}]: Using BOTTLE_COUNT (bc) fallback tag`);
         }
       } else {
         productionCounterType = 'bc';
-        console.log(`✓ OEE Curve [Line ${lineId}]: Using cached BOTTLE_COUNT (bc) fallback tag`);
       }
     }
 
@@ -461,13 +446,6 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
       totalCaseCount = lastTagValueNumber - batchStartValue;
       totalNetProduction = totalCaseCount * numberOfContainersPerPack;
       
-      console.log(`\n--- Initial Values (CASE_COUNT Mode) ---`);
-      console.log(`First Case Count Value: ${batchStartValue}`);
-      console.log(`Last Case Count Value: ${lastTagValueNumber}`);
-      console.log(`Case Count Difference: ${totalCaseCount}`);
-      console.log(`Number of Containers Per Pack: ${numberOfContainersPerPack}`);
-      console.log(`Total Net Production: ${totalNetProduction} bottles`);
-      
       if (totalCaseCount < 0) {
         console.error(`❌ ERROR: Negative case count difference! Counter reset detected.`);
       }
@@ -476,18 +454,10 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
       totalNetProduction = lastTagValueNumber - batchStartValue;
       totalCaseCount = 0; // Not applicable for direct bottle counting
       
-      console.log(`\n--- Initial Values (BOTTLE_COUNT Mode) ---`);
-      console.log(`First Bottle Count Value: ${batchStartValue}`);
-      console.log(`Last Bottle Count Value: ${lastTagValueNumber}`);
-      console.log(`Bottle Count Difference: ${totalNetProduction}`);
-      console.log(`Total Net Production: ${totalNetProduction} bottles (direct)`);
-      console.log(`Note: Using direct bottle counter - no case conversion needed`);
-      
       if (totalNetProduction < 0) {
         console.error(`❌ ERROR: Negative bottle count difference! Counter reset detected.`);
       }
     }
-    console.log(`\n--- Processing Minutes ---`);
 
     // Main loop: generate minute timestamps first
     const minuteTimestamps = [];
@@ -497,8 +467,6 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
       minuteTimestamps.push(currentTime.clone());
       currentTime = currentTime.add(sampleInterval, 'minute');
     }
-    
-    console.log(`Processing ${minuteTimestamps.length} time points with ${sampleInterval}-minute intervals`);
     
     // Build minuteValueMap based on the actual timestamps that will be used
     // This ensures perfect alignment between map keys and actual processing
@@ -544,11 +512,8 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
     // Get the actual last timestamp to ensure we use the correct last value
     const lastTimestamp = minuteTimestamps[minuteTimestamps.length - 1];
     
-    console.log(`Processing ${minuteTimestamps.length} time points in batches of ${BATCH_SIZE}`);
-    
     for (let i = 0; i < minuteTimestamps.length; i += BATCH_SIZE) {
       const batch = minuteTimestamps.slice(i, i + BATCH_SIZE);
-      console.log(`Processing batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(minuteTimestamps.length/BATCH_SIZE)} (${batch.length} items)`);
       
       const batchResults = await Promise.all(
         batch.map(async (minute) => {
@@ -587,7 +552,6 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
           if (currentValue < 0) {
             isValid = false;
             validationErrors.push(`Negative bottle count: ${currentValue}`);
-            console.warn(`  ⚠️  WARNING: Negative bottle count detected (possible counter reset)`);
             console.error(`  ❌ SKIPPED: ${validationErrors.join(', ')}`);
           }
           
@@ -607,15 +571,6 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
             machineStateTagValues
           );
 
-          // Log metrics
-          console.log(`  Metrics:`);
-          console.log(`    VOT: ${metrics.vot.toFixed(2)} min`);
-          console.log(`    QL: ${metrics.ql.toFixed(2)} min`);
-          console.log(`    NOT: ${metrics.not.toFixed(2)} min`);
-          console.log(`    UDT: ${metrics.udt.toFixed(2)} min`);
-          console.log(`    GOT: ${metrics.got.toFixed(2)} min`);
-          console.log(`    Batch Duration: ${metrics.batchDuration.toFixed(2)} min`);
-
           // Additional validation after metrics calculation
           if (!isFinite(metrics.vot) || isNaN(metrics.vot)) {
             isValid = false;
@@ -626,7 +581,6 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
           if (metrics.vot < 0) {
             isValid = false;
             validationErrors.push(`Negative VOT: ${metrics.vot}`);
-            console.warn(`  ⚠️  WARNING: Negative VOT detected`);
             console.error(`  ❌ SKIPPED: ${validationErrors.join(', ')}`);
           }
           
@@ -639,20 +593,11 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
           const quality = metrics.not > 0 ? (metrics.vot / metrics.not) * 100 : 0;
           const oee = (availability * performance * quality) / 10000;
 
-          // Log OEE components
-          console.log(`  OEE Components:`);
-          console.log(`    Availability: ${availability.toFixed(2)}%`);
-          console.log(`    Performance: ${performance.toFixed(2)}%`);
-          console.log(`    Quality: ${quality.toFixed(2)}%`);
-          console.log(`    OEE: ${oee.toFixed(2)}%`);
-          
           // Final validation
           if (!isFinite(oee) || isNaN(oee) || oee < 0) {
             console.error(`  ❌ SKIPPED: Invalid OEE value (${oee})`);
             return null;
           }
-          
-          console.log(`  ✓ VALID - Stored`);
 
           return {
             timestamp: minute.toISOString(),
@@ -670,11 +615,6 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
       
       // Filter out null values (skipped minutes)
       const validResults = batchResults.filter(result => result !== null);
-      const skippedCount = batchResults.length - validResults.length;
-      
-      if (skippedCount > 0) {
-        console.warn(`\n⚠️  Batch ${Math.floor(i/BATCH_SIZE) + 1}: ${skippedCount} minute(s) skipped due to invalid data`);
-      }
       
       oeeTimeSeries.push(...validResults);
       
@@ -683,21 +623,6 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
 
     // Ensure the result is sorted by timestamp ascending (in case Promise.all returns out of order)
     oeeTimeSeries.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-    // Final summary log
-    const totalMinutes = minuteTimestamps.length;
-    const validMinutes = oeeTimeSeries.length;
-    const skippedMinutes = totalMinutes - validMinutes;
-    
-    console.log(`\n=== OEE CURVE CALCULATION SUMMARY ===`);
-    console.log(`Production Counter Type: ${productionCounterType.toUpperCase()}`);
-    console.log(`Total Minutes Processed: ${totalMinutes}`);
-    console.log(`Valid Minutes Stored: ${validMinutes}`);
-    console.log(`Skipped Minutes: ${skippedMinutes}`);
-    if (skippedMinutes > 0) {
-      console.warn(`⚠️  ${skippedMinutes} minute(s) were skipped due to invalid data (negative values, zero designSpeed, etc.)`);
-    }
-    console.log(`=== END OEE CURVE CALCULATION ===\n`);
 
     return oeeTimeSeries;
   } catch (error) {
