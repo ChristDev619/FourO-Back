@@ -84,8 +84,8 @@ try {
   await AlarmAggregation.destroy({ where: { jobId }, transaction });
   await MachineStateAggregation.destroy({ where: { jobId }, transaction });
 
-  // Step 3: Recreate aggregations (using new SQL-based function)
-  await aggregateAlarmsSQL(jobId, transaction);
+  // Step 3: Recreate aggregations (using JavaScript-based function with correct alarm sequence detection)
+  await aggregateAlarms(jobId, transaction);
   
   // Notify alarm aggregation completion
   try {

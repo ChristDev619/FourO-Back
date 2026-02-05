@@ -750,7 +750,7 @@ async function aggregateAlarmsSQL(jobId, transaction = null) {
         // Get line name using Sequelize model (avoid reserved word issues)
         let lineName = null;
         if (job.lineId) {
-            const lineQuery = `SELECT name FROM lms.Lines WHERE id = ?`;
+            const lineQuery = `SELECT name FROM \`Lines\` WHERE id = ?`;
             const lineResult = await sequelize.query(lineQuery, {
                 replacements: [job.lineId],
                 type: QueryTypes.SELECT,
@@ -760,7 +760,7 @@ async function aggregateAlarmsSQL(jobId, transaction = null) {
         }
         
         // Get machine names
-        const machineNamesQuery = `SELECT id, name FROM lms.Machines WHERE id IN (?)`;
+        const machineNamesQuery = `SELECT id, name FROM \`Machines\` WHERE id IN (?)`;
         const machineNamesResult = await sequelize.query(machineNamesQuery, {
             replacements: [machineIds],
             type: QueryTypes.SELECT,
