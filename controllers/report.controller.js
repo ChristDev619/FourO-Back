@@ -1774,4 +1774,267 @@ module.exports = {
             res.status(500).json({ error: error.message });
         }
     },
+
+    // Get live Gantt chart data for a report (running job)
+    getLiveGanttData: async (req, res) => {
+        try {
+            console.log('=== Report Live Gantt Chart Query Started ===');
+            console.log('Report ID:', req.params.id);
+
+            const NO_DATA_LABEL = "No Data";
+            const NO_DATA_COLOR = "#b0b0b0";
+
+            // Fetch report
+            const report = await Report.findByPk(req.params.id);
+            if (!report) {
+                console.log('ERROR: Report not found');
+                return res.status(404).json({ message: "Report not found" });
+            }
+
+            // Parse report config
+            const config = typeof report.config === 'string' ? JSON.parse(report.config) : report.config;
+            console.log('Report Config:', { 
+                selectedJobId: config.selectedJobId,
+                selectedLineId: config.selectedLineId,
+                isRunningJob: config.isRunningJob
+            });
+
+            // Check if this is a running job report
+            if (!config.isRunningJob) {
+                return res.status(400).json({ message: "This report is not for a running job" });
+            }
+
+            // Get job from config
+            const job = await Job.findByPk(config.selectedJobId, {
+                attributes: ["id", "actualStartTime", "actualEndTime", "programId", "lineId", "skuId"],
+                include: [
+                    { model: Sku, as: "sku", attributes: ["id", "name"] }
+                ],
+                raw: false
+            });
+
+            if (!job) {
+                console.log('ERROR: Job not found');
+                return res.status(404).json({ message: "Job not found" });
+            }
+
+            // Check if job is still running
+            if (job.actualEndTime !== null) {
+                console.log('WARNING: Job has already completed');
+                return res.status(400).json({ 
+                    message: "Job has completed. Live Gantt is only available for running jobs.",
+                    jobCompleted: true
+                });
+            }
+
+            console.log('Active Job:', { 
+                id: job.id, 
+                startTime: job.actualStartTime,
+                lineId: job.lineId,
+                programId: job.programId 
+            });
+
+            // Get line with machines
+            const line = await Line.findByPk(job.lineId, {
+                attributes: ["id", "name"],
+                include: [
+                    { model: Machine, as: "machines", attributes: ["id", "name"] }
+                ],
+            });
+
+            if (!line) {
+                return res.status(404).json({ message: "Line not found" });
+            }
+
+            const machineIds = line.machines.map(m => m.id);
+            console.log('Config:', { 
+                lineId: line.id, 
+                machineCount: machineIds.length 
+            });
+
+            if (machineIds.length === 0) {
+                return res.status(400).json({ message: "No machines found for this line" });
+            }
+
+            // Get current time from database
+            const dbNowResult = await sequelize.query('SELECT NOW() as now, NOW() as fourHoursAgo', { 
+                type: sequelize.QueryTypes.SELECT 
+            });
+            const now = new Date(dbNowResult[0].now);
+            const fourHoursAgo = new Date(new Date(dbNowResult[0].fourHoursAgo).getTime() - 4 * 60 * 60 * 1000);
+
+            console.log('Live Gantt - Database NOW():', {
+                now: now.toISOString(),
+                fourHoursAgo: fourHoursAgo.toISOString()
+            });
+
+            // Filter machines to exclude labeller
+            const filteredMachineIds = machineIds.filter(machineId => {
+                const machine = line.machines.find(m => m.id === machineId);
+                return machine && !machine.name.toLowerCase().includes('labeller');
+            });
+
+            // Get machine state tags
+            const machineStateTags = await Tags.findAll({
+                where: {
+                    taggableId: { [Op.in]: filteredMachineIds },
+                    taggableType: "machine",
+                    name: { [Op.like]: "%State%" }
+                },
+                attributes: ["id", "name", "ref", "taggableId"],
+                raw: true
+            });
+
+            console.log('Machine State Tags found:', machineStateTags.length);
+
+            if (machineStateTags.length === 0) {
+                console.log('ERROR: No machine state tags found for machines:', filteredMachineIds);
+                return res.status(404).json({ 
+                    message: "No machine state tags found for selected machines",
+                    data: [],
+                    job: job
+                });
+            }
+
+            // Get tag values for the last 4 hours (to match dashboard behavior)
+            const tagValues = await TagValues.findAll({
+                where: {
+                    tagId: { [Op.in]: machineStateTags.map(tag => tag.id) },
+                    createdAt: {
+                        [Op.gte]: sequelize.literal('DATE_SUB(NOW(), INTERVAL 4 HOUR)')
+                    }
+                },
+                order: [['createdAt', 'ASC']],
+                attributes: ["id", "tagId", "value", "createdAt"],
+                raw: true
+            });
+
+            console.log(`Live Gantt - Found ${tagValues.length} tag values in last 4 hours`);
+
+            // Get the latest timestamp
+            const latestTimestamp = tagValues.length > 0 
+                ? new Date(Math.max(...tagValues.map(tv => new Date(tv.createdAt).getTime())))
+                : now;
+
+            console.log('Live Gantt - Latest data timestamp:', latestTimestamp.toISOString());
+
+            // Get machine names
+            const machines = line.machines.filter(m => filteredMachineIds.includes(m.id));
+            const machineMap = {};
+            machines.forEach(machine => {
+                machineMap[machine.id] = machine.name;
+            });
+
+            // Transform data for Gantt chart
+            const chartData = [];
+            const tagMap = {};
+            machineStateTags.forEach(tag => {
+                tagMap[tag.id] = {
+                    machineId: tag.taggableId,
+                    machineName: machineMap[tag.taggableId] || `Machine ${tag.taggableId}`,
+                    tagName: tag.name
+                };
+            });
+
+            // Group tag values by machine
+            const machineSegments = {};
+
+            tagValues.forEach(tagValue => {
+                const tagInfo = tagMap[tagValue.tagId];
+                if (!tagInfo) return;
+
+                const machineId = tagInfo.machineId;
+                if (!machineSegments[machineId]) {
+                    machineSegments[machineId] = {
+                        machineName: tagInfo.machineName,
+                        segments: []
+                    };
+                }
+
+                machineSegments[machineId].segments.push({
+                    value: tagValue.value,
+                    timestamp: tagValue.createdAt
+                });
+            });
+
+            // Create Gantt chart data structure
+            chartData.push([
+                { type: "string", id: "Role" },
+                { type: "string", id: "State" },
+                { type: "string", id: "style", role: "style" },
+                { type: "date", id: "Start" },
+                { type: "date", id: "End" },
+            ]);
+
+            // Process each machine's segments
+            Object.values(machineSegments).forEach(machine => {
+                const segments = machine.segments.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                for (let i = 0; i < segments.length; i++) {
+                    const currentSegment = segments[i];
+                    const nextSegment = segments[i + 1];
+
+                    const startTime = new Date(currentSegment.timestamp);
+                    const endTime = nextSegment ? new Date(nextSegment.timestamp) : latestTimestamp;
+
+                    // Get state label and color
+                    const stateLabel = STATE_CONFIG.getStateLabel(currentSegment.value);
+                    const stateColor = STATE_CONFIG.getStateColorByCode(currentSegment.value);
+
+                    // Debug logging for last segment
+                    if (!nextSegment) {
+                        console.log(`Live Gantt - ${machine.machineName} last segment:`, {
+                            value: currentSegment.value,
+                            stateLabel,
+                            startTime: startTime.toISOString(),
+                            endTime: endTime.toISOString(),
+                            duration: ((endTime - startTime) / 1000).toFixed(1) + 's'
+                        });
+                    }
+
+                    chartData.push([
+                        machine.machineName,
+                        stateLabel,
+                        `color: ${stateColor}`,
+                        startTime,
+                        endTime
+                    ]);
+                }
+            });
+
+            const response = {
+                data: chartData,
+                job: {
+                    id: job.id,
+                    actualStartTime: job.actualStartTime,
+                    actualEndTime: job.actualEndTime,
+                    programId: job.programId,
+                    sku: job.sku ? {
+                        id: job.sku.id,
+                        name: job.sku.name
+                    } : null
+                },
+                timeRange: {
+                    start: fourHoursAgo,
+                    end: latestTimestamp
+                },
+                machines: machines.map(m => ({
+                    id: m.id,
+                    name: m.name
+                }))
+            };
+
+            console.log('Live Gantt Response:', {
+                chartRows: chartData.length - 1,
+                machineCount: machines.length,
+                timeRange: response.timeRange
+            });
+            console.log('=== Report Live Gantt Chart Query Completed ===\n');
+
+            res.json(response);
+        } catch (error) {
+            console.error("Error executing Report Live Gantt Chart query:", error);
+            res.status(500).json({ message: "Server error during live data retrieval" });
+        }
+    }
 };
