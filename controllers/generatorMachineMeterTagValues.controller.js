@@ -495,7 +495,8 @@ exports.withMetersAndTagsByUnitAll = async (req, res) => {
   const { unitId } = req.body;
 
   try {
-    const results = await GeneratorMachineMeterTagValues.findAll({
+    // Query 1: Get generator meters from the view
+    const generatorResults = await GeneratorMachineMeterTagValues.findAll({
       where: {
         tag_unit_id: unitId,
       },
@@ -514,20 +515,46 @@ exports.withMetersAndTagsByUnitAll = async (req, res) => {
       ],
     });
 
+    // Query 2: Get receiver meters directly from meters+tags tables
+    const receiverResults = await sequelize.query(`
+      SELECT 
+        NULL AS generator_id,
+        NULL AS generator_name,
+        NULL AS tariffType,
+        m.id AS machine_id,
+        m.name AS machine_name,
+        mt.id AS meter_id,
+        mt.name AS meter_name,
+        mt.type AS meter_type,
+        t.id AS tag_id,
+        t.name AS tag_name,
+        t.unitId AS tag_unit_id
+      FROM meters mt
+      LEFT JOIN machines m ON mt.machineId = m.id
+      LEFT JOIN tags t ON (mt.id = t.taggableId AND t.taggableType = 'meter')
+      WHERE mt.type = 'receiver' AND t.unitId = ${unitId}
+    `, { type: sequelize.QueryTypes.SELECT });
+
+    // Merge both results
+    const results = [...generatorResults, ...receiverResults];
+
     const generators = {};
     const meters = {};
     const tags = {};
-    console.log(results, "results");
+    console.log(results, "results (including receivers)");
+    
     results.forEach((result) => {
       const generatorId = result.generator_id;
       const generatorName = result.generator_name;
       const tariffType = result.tariffType;
       const meterId = result.meter_id;
       const meterName = result.meter_name;
+      const meterType = result.meter_type;
       const tagId = result.tag_id;
       const tagName = result.tag_name;
 
-      if (!generators[generatorId]) {
+      // Only add generator if it exists (will be NULL for receiver meters)
+      if (generatorId && !generators[generatorId]) {
         generators[generatorId] = {
           id: generatorId,
           name: generatorName,
@@ -535,16 +562,22 @@ exports.withMetersAndTagsByUnitAll = async (req, res) => {
         };
       }
 
-      if (!meters[meterId]) {
+      if (meterId && !meters[meterId]) {
         meters[meterId] = {
           id: meterId,
           name: meterName,
-          generatorId: generatorId,
+          meterType: meterType,  // Include meter type
+          generatorId: generatorId,  // Will be NULL for receivers
         };
       }
 
-      if (!tags[tagId]) {
-        tags[tagId] = { id: tagId, name: tagName, meterId: meterId };
+      if (tagId && !tags[tagId]) {
+        tags[tagId] = { 
+          id: tagId, 
+          name: tagName, 
+          meterId: meterId,
+          meterType: meterType,  // Include meter type for frontend filtering
+        };
       }
     });
 
@@ -563,7 +596,8 @@ exports.withMetersAndTagsByUnitAllNoUnit = async (req, res) => {
   const { unitId } = req.body;
 
   try {
-    const results = await GeneratorMachineMeterTagValues.findAll({
+    // Query 1: Get generator meters from the view
+    const generatorResults = await GeneratorMachineMeterTagValues.findAll({
       // where: {
       //   tag_unit_id: unitId,
       // },
@@ -582,20 +616,46 @@ exports.withMetersAndTagsByUnitAllNoUnit = async (req, res) => {
       ],
     });
 
+    // Query 2: Get receiver meters directly from meters+tags tables
+    const receiverResults = await sequelize.query(`
+      SELECT 
+        NULL AS generator_id,
+        NULL AS generator_name,
+        NULL AS tariffType,
+        m.id AS machine_id,
+        m.name AS machine_name,
+        mt.id AS meter_id,
+        mt.name AS meter_name,
+        mt.type AS meter_type,
+        t.id AS tag_id,
+        t.name AS tag_name,
+        t.unitId AS tag_unit_id
+      FROM meters mt
+      LEFT JOIN machines m ON mt.machineId = m.id
+      LEFT JOIN tags t ON (mt.id = t.taggableId AND t.taggableType = 'meter')
+      WHERE mt.type = 'receiver'
+    `, { type: sequelize.QueryTypes.SELECT });
+
+    // Merge both results
+    const results = [...generatorResults, ...receiverResults];
+
     const generators = {};
     const meters = {};
     const tags = {};
-    console.log(results, "results");
+    console.log(results, "results (including receivers)");
+    
     results.forEach((result) => {
       const generatorId = result.generator_id;
       const generatorName = result.generator_name;
       const tariffType = result.tariffType;
       const meterId = result.meter_id;
       const meterName = result.meter_name;
+      const meterType = result.meter_type;
       const tagId = result.tag_id;
       const tagName = result.tag_name;
 
-      if (!generators[generatorId]) {
+      // Only add generator if it exists (will be NULL for receiver meters)
+      if (generatorId && !generators[generatorId]) {
         generators[generatorId] = {
           id: generatorId,
           name: generatorName,
@@ -603,16 +663,22 @@ exports.withMetersAndTagsByUnitAllNoUnit = async (req, res) => {
         };
       }
 
-      if (!meters[meterId]) {
+      if (meterId && !meters[meterId]) {
         meters[meterId] = {
           id: meterId,
           name: meterName,
-          generatorId: generatorId,
+          meterType: meterType,  // NOW INCLUDES TYPE
+          generatorId: generatorId,  // Will be NULL for receivers
         };
       }
 
-      if (!tags[tagId]) {
-        tags[tagId] = { id: tagId, name: tagName, meterId: meterId };
+      if (tagId && !tags[tagId]) {
+        tags[tagId] = { 
+          id: tagId, 
+          name: tagName, 
+          meterId: meterId,
+          meterType: meterType,  // ADD THIS for frontend filtering
+        };
       }
     });
 
