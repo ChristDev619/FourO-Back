@@ -253,11 +253,12 @@ async function calculateTotalBreakdownTimeForLine(jobId) {
     const machineIds = lineMachines.map(lm => lm.machineId).filter(Boolean);
 
     // Fetch all relevant breakdown alarms from alarmaggregations for all machines in this job window
+    // Only include alarms >= 10 min (breakdowns threshold)
     const alarms = await AlarmAggregation.findAll({
         where: {
             jobId: job.id,
             machineId: { [Op.in]: machineIds },
-            duration: { [Op.gte]: 5 },
+            duration: { [Op.gte]: 10 },
         },
         order: [["alarmStartDateTime", "ASC"]],
     });

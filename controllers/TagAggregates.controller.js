@@ -293,12 +293,12 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
             });
 
             // ============================================================
-            // PHASE 2: COLLECT QUALIFYING ALARMS (>= 10 min AND production during alarm)
+            // PHASE 2: COLLECT QUALIFYING ALARMS (production during alarm - any duration)
+            // NOTE: Duration >= 10 min filter is applied at query time in reports/breakdowns
             // ============================================================
-            console.log('\n--- PHASE 2: Collect Qualifying Alarms (>= 10 min AND production during alarm) ---\n');
+            console.log('\n--- PHASE 2: Collect Qualifying Alarms (production during alarm - any duration) ---\n');
 
             let totalAlarmsFound = 0;
-            let totalAlarmsLessThan10Min = 0;
             let totalAlarmsNotProducing = 0;
             let totalAlarmsSaved = 0;
 
@@ -372,47 +372,41 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
                         console.log(`      ⏹️  Alarm #${currentAlarm} ENDED at ${nextValue.createdAt}`);
                         console.log(`      ⏱️  Duration: ${durationMinutes.toFixed(2)} minutes`);
 
-                        // Only save alarms >= 10 minutes
-                        if (durationMinutes >= 10) {
-                            // NEW CHECK: Verify OutputTotal increased during THIS alarm
-                            const outputCheck = await checkOutputTotalDuringAlarm(
-                                machineTag.machineId,
-                                machineTag.lineId,
-                                alarmStartTime,
-                                nextValue.createdAt,
-                                transaction
-                            );
+                        // Check OutputTotal increased during THIS alarm (required for all alarms)
+                        // Duration filter (>= 10 min) is applied at query time (reports/breakdowns), not here
+                        const outputCheck = await checkOutputTotalDuringAlarm(
+                            machineTag.machineId,
+                            machineTag.lineId,
+                            alarmStartTime,
+                            nextValue.createdAt,
+                            transaction
+                        );
 
-                            if (outputCheck.increased) {
-                                totalAlarmsSaved++;
-                                console.log(`      ✅ SAVED: Alarm meets ALL criteria (>= 10 min AND production during alarm)`);
-                                console.log(`      📊 OutputTotal: ${outputCheck.firstValue} → ${outputCheck.lastValue}`);
+                        if (outputCheck.increased) {
+                            totalAlarmsSaved++;
+                            console.log(`      ✅ SAVED: Production confirmed during alarm (OutputTotal: ${outputCheck.firstValue} → ${outputCheck.lastValue})`);
 
-                                const createOptions = {
-                                    jobId: job.id,
-                                    machineId: machineTag.machineId,
-                                    machineName: machineTag.machineName,
-                                    tagId: machineTag.tagId,
-                                    tagName: machineTag.tagName,
-                                    lineId: machineTag.lineId,
-                                    lineName: machineTag.lineName,
-                                    alarmCode: currentAlarm,
-                                    alarmStartDateTime: alarmStartTime,
-                                    alarmEndDateTime: nextValue.createdAt,
-                                    duration: durationMinutes,
-                                    processed: true,
-                                };
-                                const createQueryOptions = {};
-                                if (transaction) createQueryOptions.transaction = transaction;
+                            const createOptions = {
+                                jobId: job.id,
+                                machineId: machineTag.machineId,
+                                machineName: machineTag.machineName,
+                                tagId: machineTag.tagId,
+                                tagName: machineTag.tagName,
+                                lineId: machineTag.lineId,
+                                lineName: machineTag.lineName,
+                                alarmCode: currentAlarm,
+                                alarmStartDateTime: alarmStartTime,
+                                alarmEndDateTime: nextValue.createdAt,
+                                duration: durationMinutes,
+                                processed: true,
+                            };
+                            const createQueryOptions = {};
+                            if (transaction) createQueryOptions.transaction = transaction;
 
-                                await db.AlarmAggregation.create(createOptions, createQueryOptions);
-                            } else {
-                                totalAlarmsNotProducing++;
-                                console.log(`      ❌ DISMISSED: No production during alarm (OutputTotal: ${outputCheck.firstValue} → ${outputCheck.lastValue})`);
-                            }
+                            await db.AlarmAggregation.create(createOptions, createQueryOptions);
                         } else {
-                            totalAlarmsLessThan10Min++;
-                            console.log(`      ❌ DISMISSED: Duration < 10 minutes (${durationMinutes.toFixed(2)} min)`);
+                            totalAlarmsNotProducing++;
+                            console.log(`      ❌ DISMISSED: No production during alarm (OutputTotal: ${outputCheck.firstValue} → ${outputCheck.lastValue})`);
                         }
 
                         // Reset tracker if next value is 0, otherwise start new sequence
@@ -441,46 +435,41 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
                     console.log(`      ⏹️  Alarm #${currentAlarm} ENDED at ${lastValue.createdAt} (LAST SEQUENCE)`);
                     console.log(`      ⏱️  Duration: ${durationMinutes.toFixed(2)} minutes`);
 
-                    if (durationMinutes >= 10) {
-                        // NEW CHECK: Verify OutputTotal increased during THIS alarm
-                        const outputCheck = await checkOutputTotalDuringAlarm(
-                            machineTag.machineId,
-                            machineTag.lineId,
-                            alarmStartTime,
-                            lastValue.createdAt,
-                            transaction
-                        );
+                    // Check OutputTotal increased during THIS alarm (required for all alarms)
+                    // Duration filter (>= 10 min) is applied at query time (reports/breakdowns), not here
+                    const outputCheck = await checkOutputTotalDuringAlarm(
+                        machineTag.machineId,
+                        machineTag.lineId,
+                        alarmStartTime,
+                        lastValue.createdAt,
+                        transaction
+                    );
 
-                        if (outputCheck.increased) {
-                            totalAlarmsSaved++;
-                            console.log(`      ✅ SAVED: Alarm meets ALL criteria (>= 10 min AND production during alarm)`);
-                            console.log(`      📊 OutputTotal: ${outputCheck.firstValue} → ${outputCheck.lastValue}`);
+                    if (outputCheck.increased) {
+                        totalAlarmsSaved++;
+                        console.log(`      ✅ SAVED: Production confirmed during alarm (OutputTotal: ${outputCheck.firstValue} → ${outputCheck.lastValue})`);
 
-                            const createOptions = {
-                                jobId: job.id,
-                                machineId: machineTag.machineId,
-                                machineName: machineTag.machineName,
-                                tagId: machineTag.tagId,
-                                tagName: machineTag.tagName,
-                                lineId: machineTag.lineId,
-                                lineName: machineTag.lineName,
-                                alarmCode: currentAlarm,
-                                alarmStartDateTime: alarmStartTime,
-                                alarmEndDateTime: lastValue.createdAt,
-                                duration: durationMinutes,
-                                processed: true,
-                            };
-                            const createQueryOptions = {};
-                            if (transaction) createQueryOptions.transaction = transaction;
+                        const createOptions = {
+                            jobId: job.id,
+                            machineId: machineTag.machineId,
+                            machineName: machineTag.machineName,
+                            tagId: machineTag.tagId,
+                            tagName: machineTag.tagName,
+                            lineId: machineTag.lineId,
+                            lineName: machineTag.lineName,
+                            alarmCode: currentAlarm,
+                            alarmStartDateTime: alarmStartTime,
+                            alarmEndDateTime: lastValue.createdAt,
+                            duration: durationMinutes,
+                            processed: true,
+                        };
+                        const createQueryOptions = {};
+                        if (transaction) createQueryOptions.transaction = transaction;
 
-                            await db.AlarmAggregation.create(createOptions, createQueryOptions);
-                        } else {
-                            totalAlarmsNotProducing++;
-                            console.log(`      ❌ DISMISSED: No production during alarm (OutputTotal: ${outputCheck.firstValue} → ${outputCheck.lastValue})`);
-                        }
+                        await db.AlarmAggregation.create(createOptions, createQueryOptions);
                     } else {
-                        totalAlarmsLessThan10Min++;
-                        console.log(`      ❌ DISMISSED: Duration < 10 minutes (${durationMinutes.toFixed(2)} min)`);
+                        totalAlarmsNotProducing++;
+                        console.log(`      ❌ DISMISSED: No production during alarm (OutputTotal: ${outputCheck.firstValue} → ${outputCheck.lastValue})`);
                     }
                 }
 
@@ -491,8 +480,7 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
             console.log(`📊 JOB ${job.id} SUMMARY`);
             console.log('========================================');
             console.log(`Total alarms found: ${totalAlarmsFound}`);
-            console.log(`  ✅ Saved (>= 10 min AND production during alarm): ${totalAlarmsSaved}`);
-            console.log(`  ❌ Dismissed (< 10 min): ${totalAlarmsLessThan10Min}`);
+            console.log(`  ✅ Saved (production confirmed during alarm): ${totalAlarmsSaved}`);
             console.log(`  ❌ Dismissed (no production during alarm): ${totalAlarmsNotProducing}`);
             console.log('========================================\n');
             console.log(`✅ Job ${job.id} alarm aggregation completed!`);

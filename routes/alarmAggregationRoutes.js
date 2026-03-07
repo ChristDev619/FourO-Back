@@ -44,8 +44,18 @@ router.get("/", async (req, res) => {
 // Get alarm aggregations by job ID
 router.get("/job/:jobId", async (req, res) => {
   try {
+    const { minDuration } = req.query;
+
+    const whereClause = { jobId: req.params.jobId };
+
+    // Optional duration filter - used by reports/breakdowns (minDuration=10)
+    // Dashboard does NOT pass minDuration so it gets all alarms
+    if (minDuration !== undefined) {
+      whereClause.duration = { [require("sequelize").Op.gte]: parseFloat(minDuration) };
+    }
+
     const aggregations = await AlarmAggregation.findAll({
-      where: { jobId: req.params.jobId },
+      where: whereClause,
       include: [
         { model: Job, as: "job" },
         { model: Line, as: "line" },
