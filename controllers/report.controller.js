@@ -418,7 +418,56 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
         console.log(`[LIVE REPORT] Using NOW() as effective end time: ${effectiveEndTime}`);
         console.log(`[LIVE REPORT] Job is currently running (actualEndTime is NULL)`);
     }
-    
+
+    // For live jobs job.skuId is NULL until the job closes.
+    // Resolve the effective SKU now using the same logic as handleRecipeAssignment
+    // so that numberOfContainersPerPack, recipe name, and EMS all work correctly.
+    let effectiveSkuId = job.skuId;
+    if (isLiveMode && !effectiveSkuId) {
+        try {
+            console.log(`\n[LIVE SKU] job.skuId is NULL — resolving effectiveSkuId from rcpn tag`);
+            const rcpnTag = await Tags.findOne({
+                where: { taggableId: line.id, taggableType: 'line', ref: TagRefs.RECIPE },
+                raw: true
+            });
+            if (rcpnTag) {
+                console.log(`[LIVE SKU] Found rcpn tag: id=${rcpnTag.id}, name=${rcpnTag.name}`);
+                const latestRcpn = await TagValues.findOne({
+                    where: { tagId: rcpnTag.id },
+                    order: [['createdAt', 'DESC']],
+                    attributes: ['value', 'createdAt'],
+                    raw: true
+                });
+                if (latestRcpn?.value) {
+                    const recipeNumber = parseInt(latestRcpn.value);
+                    console.log(`[LIVE SKU] rcpn tag value: "${latestRcpn.value}" → recipeNumber=${recipeNumber}`);
+                    const [recipeRow] = await sequelize.query(
+                        `SELECT r.id, r.skuId 
+                         FROM recipes r
+                         JOIN linerecipies lr ON r.id = lr.recipieId
+                         WHERE r.number = :recipeNumber 
+                         AND lr.lineId = :lineId 
+                         LIMIT 1`,
+                        { replacements: { recipeNumber, lineId: line.id }, type: QueryTypes.SELECT }
+                    );
+                    if (recipeRow?.skuId) {
+                        effectiveSkuId = recipeRow.skuId;
+                        console.log(`[LIVE SKU] ✅ effectiveSkuId resolved: ${effectiveSkuId} (from recipe id=${recipeRow.id})`);
+                    } else {
+                        console.log(`[LIVE SKU] ⚠️  No recipe found in linerecipies for recipeNumber=${recipeNumber}, lineId=${line.id}`);
+                    }
+                } else {
+                    console.log(`[LIVE SKU] ⚠️  rcpn tag has no values yet`);
+                }
+            } else {
+                console.log(`[LIVE SKU] ⚠️  No rcpn tag found for line ${line.id} (${line.name})`);
+            }
+        } catch (err) {
+            console.error('[LIVE SKU] ❌ Error resolving effectiveSkuId:', err);
+        }
+        console.log(`[LIVE SKU] Final effectiveSkuId: ${effectiveSkuId ?? 'null'}\n`);
+    }
+
     const fillerCount = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.BOTTLES_COUNT, job.actualStartTime, effectiveEndTime, program, isLiveMode);
     console.log(`[REPORT] Filler Count (bc): ${fillerCount}`);
     
@@ -434,10 +483,11 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
 
     // Get SKU configuration for production calculation
     let numberOfContainersPerPack = 1;
-    if (job.skuId) {
-        const sku = await Sku.findByPk(job.skuId);
+    if (effectiveSkuId) {
+        const sku = await Sku.findByPk(effectiveSkuId);
         if (sku && sku.numberOfContainersPerPack) {
             numberOfContainersPerPack = sku.numberOfContainersPerPack;
+            console.log(`[REPORT] numberOfContainersPerPack=${numberOfContainersPerPack} (skuId=${effectiveSkuId})`);
         }
     }
 
@@ -677,56 +727,11 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     // Waterfall
     const waterfallData = prepareWaterfallData(program, job, metrics, isLiveMode);
 
-    // Recipe
+    // Recipe — uses effectiveSkuId (works for both historical and live)
     let recipe = null;
-    if (job.skuId) {
-        recipe = await Recipie.findOne({ where: { skuId: job.skuId } });
-    } else if (isLiveMode) {
-        // For running jobs, skuId is not yet written to the jobs table.
-        // Read the current recipe from the live rcpn tag value (same Sku.id as historical).
-        console.log(`\n[LIVE RECIPE] job.skuId is NULL — falling back to live rcpn tag`);
-        console.log(`[LIVE RECIPE] Searching for rcpn tag on line ${line.id} (${line.name})`);
-        try {
-            const rcpnTag = await Tags.findOne({
-                where: { taggableId: line.id, taggableType: 'line', ref: TagRefs.RECIPE },
-                raw: true
-            });
-            if (rcpnTag) {
-                console.log(`[LIVE RECIPE] Found rcpn tag: id=${rcpnTag.id}, name=${rcpnTag.name}`);
-                const latestRcpn = await TagValues.findOne({
-                    where: { tagId: rcpnTag.id },
-                    order: [['createdAt', 'DESC']],
-                    attributes: ['value', 'createdAt'],
-                    raw: true
-                });
-                if (latestRcpn?.value) {
-                    const rcpnValue = String(latestRcpn.value).trim();
-                    console.log(`[LIVE RECIPE] Latest rcpn value: "${rcpnValue}" (recorded at ${latestRcpn.createdAt})`);
-                    console.log(`[LIVE RECIPE] Looking up SKU by name="${rcpnValue}"...`);
-                    // rcpn tag stores the Sku.name (e.g. "1004"), not Sku.id
-                    const liveSku = await Sku.findOne({ where: { name: rcpnValue }, raw: true });
-                    if (liveSku) {
-                        console.log(`[LIVE RECIPE] ✅ SKU found: name="${liveSku.name}", id=${liveSku.id}`);
-                        console.log(`[LIVE RECIPE] Looking up recipe for skuId=${liveSku.id}...`);
-                        recipe = await Recipie.findOne({ where: { skuId: liveSku.id } });
-                        if (recipe) {
-                            console.log(`[LIVE RECIPE] ✅ Recipe found: "${recipe.name}" (id=${recipe.id}, skuId=${liveSku.id})`);
-                        } else {
-                            console.log(`[LIVE RECIPE] ⚠️  No recipe found in Recipes table for skuId=${liveSku.id}`);
-                        }
-                    } else {
-                        console.log(`[LIVE RECIPE] ⚠️  No SKU found with name="${rcpnValue}" in Skus table`);
-                    }
-                } else {
-                    console.log(`[LIVE RECIPE] ⚠️  rcpn tag (id=${rcpnTag.id}) has no recorded values yet`);
-                }
-            } else {
-                console.log(`[LIVE RECIPE] ⚠️  No rcpn tag found for line ${line.id} (${line.name})`);
-            }
-        } catch (err) {
-            console.error('[LIVE RECIPE] ❌ Error reading live recipe from rcpn tag:', err);
-        }
-        console.log(`[LIVE RECIPE] Final recipe result: ${recipe ? `"${recipe.name}"` : 'null (will show N/A)'}\n`);
+    if (effectiveSkuId) {
+        recipe = await Recipie.findOne({ where: { skuId: effectiveSkuId } });
+        console.log(`[REPORT] Recipe lookup for skuId=${effectiveSkuId}: ${recipe ? `"${recipe.name}"` : 'not found'}`);
     }
 
     // EMS Calculations
@@ -743,7 +748,7 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     };
 
     try {
-        const sku = job.skuId ? await Sku.findByPk(job.skuId) : null;
+        const sku = effectiveSkuId ? await Sku.findByPk(effectiveSkuId) : null;
         const emsDeps = {
             Tags, TagValues, Op, Meters, Unit, Generator, GeneratorMeter, 
             TariffUsage, Tariff, sequelize, QueryTypes, Line, Location
