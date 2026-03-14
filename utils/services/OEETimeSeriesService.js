@@ -305,6 +305,7 @@ class OEETimeSeriesService {
       });
       
       console.log(`Successfully completed OEE curve calculation for jobId: ${jobId} in ${duration}ms`);
+      console.log(`🔖 OEE TIME SERIES - VERSION: 10000000000 - COMPLETED for jobId: ${jobId}`);
 
     } catch (err) {
       const duration = Date.now() - startTime;

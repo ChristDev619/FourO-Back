@@ -681,6 +681,48 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     let recipe = null;
     if (job.skuId) {
         recipe = await Recipie.findOne({ where: { skuId: job.skuId } });
+    } else if (isLiveMode) {
+        // For running jobs, skuId is not yet written to the jobs table.
+        // Read the current recipe from the live rcpn tag value (same Sku.id as historical).
+        console.log(`\n[LIVE RECIPE] job.skuId is NULL — falling back to live rcpn tag`);
+        console.log(`[LIVE RECIPE] Searching for rcpn tag on line ${line.id} (${line.name})`);
+        try {
+            const rcpnTag = await Tags.findOne({
+                where: { taggableId: line.id, taggableType: 'line', ref: TagRefs.RECIPE },
+                raw: true
+            });
+            if (rcpnTag) {
+                console.log(`[LIVE RECIPE] Found rcpn tag: id=${rcpnTag.id}, name=${rcpnTag.name}`);
+                const latestRcpn = await TagValues.findOne({
+                    where: { tagId: rcpnTag.id },
+                    order: [['createdAt', 'DESC']],
+                    attributes: ['value', 'createdAt'],
+                    raw: true
+                });
+                if (latestRcpn?.value) {
+                    console.log(`[LIVE RECIPE] Latest rcpn value: ${latestRcpn.value} (recorded at ${latestRcpn.createdAt})`);
+                    const liveSkuId = parseInt(latestRcpn.value);
+                    if (liveSkuId) {
+                        console.log(`[LIVE RECIPE] Looking up recipe for skuId=${liveSkuId}...`);
+                        recipe = await Recipie.findOne({ where: { skuId: liveSkuId } });
+                        if (recipe) {
+                            console.log(`[LIVE RECIPE] ✅ Recipe found: "${recipe.name}" (id=${recipe.id}, skuId=${liveSkuId})`);
+                        } else {
+                            console.log(`[LIVE RECIPE] ⚠️  No recipe found in DB for skuId=${liveSkuId}`);
+                        }
+                    } else {
+                        console.log(`[LIVE RECIPE] ⚠️  rcpn tag value "${latestRcpn.value}" could not be parsed as a valid skuId`);
+                    }
+                } else {
+                    console.log(`[LIVE RECIPE] ⚠️  rcpn tag (id=${rcpnTag.id}) has no recorded values yet`);
+                }
+            } else {
+                console.log(`[LIVE RECIPE] ⚠️  No rcpn tag found for line ${line.id} (${line.name})`);
+            }
+        } catch (err) {
+            console.error('[LIVE RECIPE] ❌ Error reading live recipe from rcpn tag:', err);
+        }
+        console.log(`[LIVE RECIPE] Final recipe result: ${recipe ? `"${recipe.name}"` : 'null (will show N/A)'}\n`);
     }
 
     // EMS Calculations
@@ -1778,8 +1820,9 @@ module.exports = {
     // Get live Gantt chart data for a report (running job)
     getLiveGanttData: async (req, res) => {
         try {
-            console.log('=== Report Live Gantt Chart Query Started ===');
-            console.log('Report ID:', req.params.id);
+            console.log('\n=== Report Live Gantt Chart Query Started ===');
+            console.log('📊 Report ID:', req.params.id);
+            console.log('🕐 Timestamp:', new Date().toISOString());
 
             const NO_DATA_LABEL = "No Data";
             const NO_DATA_COLOR = "#b0b0b0";
@@ -1787,55 +1830,81 @@ module.exports = {
             // Fetch report
             const report = await Report.findByPk(req.params.id);
             if (!report) {
-                console.log('ERROR: Report not found');
+                console.log('❌ ERROR: Report not found');
                 return res.status(404).json({ message: "Report not found" });
             }
+            console.log('✅ Report found:', report.id);
 
             // Parse report config
             const config = typeof report.config === 'string' ? JSON.parse(report.config) : report.config;
-            console.log('Report Config:', { 
+            console.log('📝 Report Config:', JSON.stringify({ 
                 selectedJobId: config.selectedJobId,
                 selectedLineId: config.selectedLineId,
+                selectedProgramId: config.selectedProgramId,
                 isRunningJob: config.isRunningJob
-            });
+            }, null, 2));
 
-            // Check if this is a running job report
-            if (!config.isRunningJob) {
-                return res.status(400).json({ message: "This report is not for a running job" });
+            // Get line from config or job (works like dashboard - no running job required)
+            let lineId = config.selectedLineId;
+            let job = null;
+
+            console.log('\n🔍 Step 1: Finding Line ID...');
+            console.log('   Initial lineId from config:', lineId || 'NOT FOUND');
+
+            // Try to get job and line info
+            if (config.selectedJobId) {
+                console.log('   Trying to get job:', config.selectedJobId);
+                job = await Job.findByPk(config.selectedJobId, {
+                    attributes: ["id", "actualStartTime", "actualEndTime", "programId", "lineId", "skuId"],
+                    include: [
+                        { model: Sku, as: "sku", attributes: ["id", "name"] },
+                        { model: Program, as: "program", attributes: ["id", "lineId"] }
+                    ],
+                    raw: false
+                });
+
+                if (job) {
+                    console.log('   ✅ Job found:', {
+                        id: job.id,
+                        lineId: job.lineId,
+                        programId: job.programId,
+                        programLineId: job.program?.lineId
+                    });
+                    lineId = lineId || job.lineId || (job.program ? job.program.lineId : null);
+                    console.log('   LineId after job check:', lineId);
+                } else {
+                    console.log('   ⚠️  Job not found');
+                }
             }
 
-            // Get job from config
-            const job = await Job.findByPk(config.selectedJobId, {
-                attributes: ["id", "actualStartTime", "actualEndTime", "programId", "lineId", "skuId"],
-                include: [
-                    { model: Sku, as: "sku", attributes: ["id", "name"] }
-                ],
-                raw: false
-            });
-
-            if (!job) {
-                console.log('ERROR: Job not found');
-                return res.status(404).json({ message: "Job not found" });
+            // If still no lineId, check if config has program
+            if (!lineId && config.selectedProgramId) {
+                console.log('   Trying to get program:', config.selectedProgramId);
+                const program = await Program.findByPk(config.selectedProgramId, {
+                    attributes: ["id", "lineId"]
+                });
+                if (program) {
+                    console.log('   ✅ Program found, lineId:', program.lineId);
+                    lineId = program.lineId;
+                } else {
+                    console.log('   ⚠️  Program not found');
+                }
             }
 
-            // Check if job is still running
-            if (job.actualEndTime !== null) {
-                console.log('WARNING: Job has already completed');
+            if (!lineId) {
+                console.log('❌ ERROR: No line information found after all attempts');
                 return res.status(400).json({ 
-                    message: "Job has completed. Live Gantt is only available for running jobs.",
-                    jobCompleted: true
+                    message: "No line information found in report config",
+                    note: "Report must have a line (via selectedLineId, job, or program)"
                 });
             }
 
-            console.log('Active Job:', { 
-                id: job.id, 
-                startTime: job.actualStartTime,
-                lineId: job.lineId,
-                programId: job.programId 
-            });
+            console.log('✅ Final Line ID:', lineId);
+            console.log('📌 Mode: Dashboard-style (no running job required)');
 
             // Get line with machines
-            const line = await Line.findByPk(job.lineId, {
+            console.log('\n🔍 Step 2: Getting Line and Machines...');
+            const line = await Line.findByPk(lineId, {
                 attributes: ["id", "name"],
                 include: [
                     { model: Machine, as: "machines", attributes: ["id", "name"] }
@@ -1843,36 +1912,47 @@ module.exports = {
             });
 
             if (!line) {
+                console.log('❌ ERROR: Line not found for ID:', lineId);
                 return res.status(404).json({ message: "Line not found" });
             }
 
+            console.log('✅ Line found:', { id: line.id, name: line.name });
+            console.log('   Machines:', line.machines.map(m => ({ id: m.id, name: m.name })));
+
             const machineIds = line.machines.map(m => m.id);
-            console.log('Config:', { 
-                lineId: line.id, 
-                machineCount: machineIds.length 
-            });
+            console.log('   Total machine count:', machineIds.length);
 
             if (machineIds.length === 0) {
+                console.log('❌ ERROR: No machines found for line');
                 return res.status(400).json({ message: "No machines found for this line" });
             }
 
             // Get current time from database
+            console.log('\n🔍 Step 3: Getting Time Range...');
             const dbNowResult = await sequelize.query('SELECT NOW() as now, NOW() as fourHoursAgo', { 
                 type: sequelize.QueryTypes.SELECT 
             });
             const now = new Date(dbNowResult[0].now);
             const fourHoursAgo = new Date(new Date(dbNowResult[0].fourHoursAgo).getTime() - 4 * 60 * 60 * 1000);
 
-            console.log('Live Gantt - Database NOW():', {
+            console.log('⏰ Time Range:', {
                 now: now.toISOString(),
-                fourHoursAgo: fourHoursAgo.toISOString()
+                fourHoursAgo: fourHoursAgo.toISOString(),
+                duration: '4 hours'
             });
 
             // Filter machines to exclude labeller
+            console.log('\n🔍 Step 4: Filtering Machines and Finding Tags...');
             const filteredMachineIds = machineIds.filter(machineId => {
                 const machine = line.machines.find(m => m.id === machineId);
-                return machine && !machine.name.toLowerCase().includes('labeller');
+                const isLabeller = machine && machine.name.toLowerCase().includes('labeller');
+                if (isLabeller) {
+                    console.log('   ⚠️  Excluding labeller:', machine.name);
+                }
+                return machine && !isLabeller;
             });
+
+            console.log('   Filtered machines:', filteredMachineIds.length, 'of', machineIds.length);
 
             // Get machine state tags
             const machineStateTags = await Tags.findAll({
@@ -1885,10 +1965,15 @@ module.exports = {
                 raw: true
             });
 
-            console.log('Machine State Tags found:', machineStateTags.length);
+            console.log('✅ Machine State Tags found:', machineStateTags.length);
+            machineStateTags.forEach(tag => {
+                const machine = line.machines.find(m => m.id === tag.taggableId);
+                console.log(`   - Tag ${tag.id}: ${tag.name} (Machine: ${machine?.name})`);
+            });
 
             if (machineStateTags.length === 0) {
-                console.log('ERROR: No machine state tags found for machines:', filteredMachineIds);
+                console.log('❌ ERROR: No machine state tags found');
+                console.log('   Searched for machines:', filteredMachineIds);
                 return res.status(404).json({ 
                     message: "No machine state tags found for selected machines",
                     data: [],
@@ -1897,6 +1982,7 @@ module.exports = {
             }
 
             // Get tag values for the last 4 hours (to match dashboard behavior)
+            console.log('\n🔍 Step 5: Fetching Tag Values (Last 4 Hours)...');
             const tagValues = await TagValues.findAll({
                 where: {
                     tagId: { [Op.in]: machineStateTags.map(tag => tag.id) },
@@ -1909,7 +1995,23 @@ module.exports = {
                 raw: true
             });
 
-            console.log(`Live Gantt - Found ${tagValues.length} tag values in last 4 hours`);
+            console.log('✅ Tag Values Found:', tagValues.length);
+            if (tagValues.length > 0) {
+                const firstValue = tagValues[0];
+                const lastValue = tagValues[tagValues.length - 1];
+                console.log('   First value:', { 
+                    time: firstValue.createdAt, 
+                    tagId: firstValue.tagId, 
+                    value: firstValue.value 
+                });
+                console.log('   Last value:', { 
+                    time: lastValue.createdAt, 
+                    tagId: lastValue.tagId, 
+                    value: lastValue.value 
+                });
+            } else {
+                console.log('   ⚠️  No tag values in last 4 hours');
+            }
 
             // Get the latest timestamp
             const latestTimestamp = tagValues.length > 0 
@@ -2004,7 +2106,7 @@ module.exports = {
 
             const response = {
                 data: chartData,
-                job: {
+                job: job ? {
                     id: job.id,
                     actualStartTime: job.actualStartTime,
                     actualEndTime: job.actualEndTime,
@@ -2013,6 +2115,10 @@ module.exports = {
                         id: job.sku.id,
                         name: job.sku.name
                     } : null
+                } : null,
+                line: {
+                    id: line.id,
+                    name: line.name
                 },
                 timeRange: {
                     start: fourHoursAgo,
@@ -2021,14 +2127,19 @@ module.exports = {
                 machines: machines.map(m => ({
                     id: m.id,
                     name: m.name
-                }))
+                })),
+                note: 'Dashboard-style Live Gantt - shows current machine states'
             };
 
-            console.log('Live Gantt Response:', {
-                chartRows: chartData.length - 1,
-                machineCount: machines.length,
-                timeRange: response.timeRange
+            console.log('\n✅ Live Gantt Response Generated:');
+            console.log('   Chart rows:', chartData.length - 1, '(excluding header)');
+            console.log('   Machine count:', machines.length);
+            console.log('   Time range:', {
+                start: response.timeRange.start.toISOString(),
+                end: response.timeRange.end.toISOString()
             });
+            console.log('   Line:', response.line);
+            console.log('   Job:', response.job ? response.job.id : 'none');
             console.log('=== Report Live Gantt Chart Query Completed ===\n');
 
             res.json(response);

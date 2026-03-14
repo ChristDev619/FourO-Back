@@ -200,6 +200,7 @@ async function aggregateAlarms(specificJobId = null, transaction = null) {
     try {
         console.log('\n========================================');
         console.log('🚀 ALARM AGGREGATION WITH 2 PHASES STARTED');
+        console.log('🔖 VERSION: 10000000000 - No duration filter at save, OutputTotal check only, duration filter applied at query time');
         console.log('========================================\n');
 
         // If specificJobId is provided, process only that job; otherwise process all unprocessed jobs
