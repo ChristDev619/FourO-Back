@@ -1950,23 +1950,14 @@ module.exports = {
                 duration: '4 hours'
             });
 
-            // Filter machines to exclude labeller
-            console.log('\n🔍 Step 4: Filtering Machines and Finding Tags...');
-            const filteredMachineIds = machineIds.filter(machineId => {
-                const machine = line.machines.find(m => m.id === machineId);
-                const isLabeller = machine && machine.name.toLowerCase().includes('labeller');
-                if (isLabeller) {
-                    console.log('   ⚠️  Excluding labeller:', machine.name);
-                }
-                return machine && !isLabeller;
-            });
+            // Get machine state tags (NO filtering - include ALL machines like dashboard)
+            console.log('\n🔍 Step 4: Finding Machine State Tags...');
+            console.log('   Using ALL machines (including labeller):', machineIds.length);
 
-            console.log('   Filtered machines:', filteredMachineIds.length, 'of', machineIds.length);
-
-            // Get machine state tags
+            // Get machine state tags for ALL machines (like dashboard behavior)
             const machineStateTags = await Tags.findAll({
                 where: {
-                    taggableId: { [Op.in]: filteredMachineIds },
+                    taggableId: { [Op.in]: machineIds },
                     taggableType: "machine",
                     name: { [Op.like]: "%State%" }
                 },
@@ -1982,7 +1973,7 @@ module.exports = {
 
             if (machineStateTags.length === 0) {
                 console.log('❌ ERROR: No machine state tags found');
-                console.log('   Searched for machines:', filteredMachineIds);
+                console.log('   Searched for machines:', machineIds);
                 return res.status(404).json({ 
                     message: "No machine state tags found for selected machines",
                     data: [],
@@ -2029,8 +2020,8 @@ module.exports = {
 
             console.log('Live Gantt - Latest data timestamp:', latestTimestamp.toISOString());
 
-            // Get machine names
-            const machines = line.machines.filter(m => filteredMachineIds.includes(m.id));
+            // Get machine names (use ALL machines, no filtering)
+            const machines = line.machines;
             const machineMap = {};
             machines.forEach(machine => {
                 machineMap[machine.id] = machine.name;
