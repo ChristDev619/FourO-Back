@@ -700,18 +700,22 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
                     raw: true
                 });
                 if (latestRcpn?.value) {
-                    console.log(`[LIVE RECIPE] Latest rcpn value: ${latestRcpn.value} (recorded at ${latestRcpn.createdAt})`);
-                    const liveSkuId = parseInt(latestRcpn.value);
-                    if (liveSkuId) {
-                        console.log(`[LIVE RECIPE] Looking up recipe for skuId=${liveSkuId}...`);
-                        recipe = await Recipie.findOne({ where: { skuId: liveSkuId } });
+                    const rcpnValue = String(latestRcpn.value).trim();
+                    console.log(`[LIVE RECIPE] Latest rcpn value: "${rcpnValue}" (recorded at ${latestRcpn.createdAt})`);
+                    console.log(`[LIVE RECIPE] Looking up SKU by name="${rcpnValue}"...`);
+                    // rcpn tag stores the Sku.name (e.g. "1004"), not Sku.id
+                    const liveSku = await Sku.findOne({ where: { name: rcpnValue }, raw: true });
+                    if (liveSku) {
+                        console.log(`[LIVE RECIPE] ✅ SKU found: name="${liveSku.name}", id=${liveSku.id}`);
+                        console.log(`[LIVE RECIPE] Looking up recipe for skuId=${liveSku.id}...`);
+                        recipe = await Recipie.findOne({ where: { skuId: liveSku.id } });
                         if (recipe) {
-                            console.log(`[LIVE RECIPE] ✅ Recipe found: "${recipe.name}" (id=${recipe.id}, skuId=${liveSkuId})`);
+                            console.log(`[LIVE RECIPE] ✅ Recipe found: "${recipe.name}" (id=${recipe.id}, skuId=${liveSku.id})`);
                         } else {
-                            console.log(`[LIVE RECIPE] ⚠️  No recipe found in DB for skuId=${liveSkuId}`);
+                            console.log(`[LIVE RECIPE] ⚠️  No recipe found in Recipes table for skuId=${liveSku.id}`);
                         }
                     } else {
-                        console.log(`[LIVE RECIPE] ⚠️  rcpn tag value "${latestRcpn.value}" could not be parsed as a valid skuId`);
+                        console.log(`[LIVE RECIPE] ⚠️  No SKU found with name="${rcpnValue}" in Skus table`);
                     }
                 } else {
                     console.log(`[LIVE RECIPE] ⚠️  rcpn tag (id=${rcpnTag.id}) has no recorded values yet`);
