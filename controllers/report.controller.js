@@ -2147,5 +2147,287 @@ module.exports = {
             console.error("Error executing Report Live Gantt Chart query:", error);
             res.status(500).json({ message: "Server error during live data retrieval" });
         }
+    },
+
+    // Get historical Gantt chart data for a report (completed job)
+    getHistoricalGanttData: async (req, res) => {
+        try {
+            console.log('\n=== Report Historical Gantt Chart Query Started ===');
+            console.log('📊 Report ID:', req.params.id);
+            console.log('🕐 Timestamp:', new Date().toISOString());
+
+            const NO_DATA_LABEL = "No Data";
+            const NO_DATA_COLOR = "#b0b0b0";
+
+            // Fetch report
+            const report = await Report.findByPk(req.params.id);
+            if (!report) {
+                console.log('❌ ERROR: Report not found');
+                return res.status(404).json({ message: "Report not found" });
+            }
+            console.log('✅ Report found:', report.id);
+
+            // Parse report config
+            const config = typeof report.config === 'string' ? JSON.parse(report.config) : report.config;
+            console.log('📝 Report Config:', JSON.stringify({ 
+                selectedJobId: config.selectedJobId,
+                isJobBased: !!config.selectedJobId
+            }, null, 2));
+
+            // Must be a job-based report
+            if (!config.selectedJobId) {
+                return res.status(400).json({ message: "This report is not job-based" });
+            }
+
+            // Get job by programId (selectedJobId is actually programId, same as dashboard)
+            console.log('\n🔍 Step 1: Getting Job by Program ID...');
+            console.log('   Program ID (from config.selectedJobId):', config.selectedJobId);
+            
+            const job = await Job.findOne({
+                where: { programId: config.selectedJobId },
+                attributes: ["id", "actualStartTime", "actualEndTime", "programId", "lineId"],
+                include: [
+                    { model: Program, as: "program", attributes: ["id", "lineId"] }
+                ],
+                order: [['actualStartTime', 'DESC']],
+                raw: false
+            });
+
+            if (!job) {
+                console.log('❌ ERROR: Job not found');
+                console.log('   Searched for programId:', config.selectedJobId);
+                console.log('   No job found with this programId');
+                return res.status(404).json({ 
+                    message: "No job found for selected program",
+                    programId: config.selectedJobId,
+                    note: "No job exists for this program in the database"
+                });
+            }
+
+            // Check if job is completed
+            if (!job.actualEndTime) {
+                console.log('⚠️  Job is still running (actualEndTime is NULL)');
+                return res.status(400).json({ 
+                    message: "Job is still running. Historical Gantt is only for completed jobs.",
+                    isRunning: true
+                });
+            }
+
+            console.log('✅ Job found (completed):', {
+                id: job.id,
+                startTime: job.actualStartTime,
+                endTime: job.actualEndTime,
+                duration: dayjs(job.actualEndTime).diff(dayjs(job.actualStartTime), 'minute') + ' minutes'
+            });
+
+            // Get line
+            const lineId = job.lineId || job.program?.lineId;
+            if (!lineId) {
+                return res.status(400).json({ message: "No line found for this job" });
+            }
+
+            console.log('\n🔍 Step 2: Getting Line and Machines...');
+            const line = await Line.findByPk(lineId, {
+                attributes: ["id", "name"],
+                include: [
+                    { model: Machine, as: "machines", attributes: ["id", "name"] }
+                ]
+            });
+
+            if (!line) {
+                console.log('❌ ERROR: Line not found');
+                return res.status(404).json({ message: "Line not found" });
+            }
+
+            console.log('✅ Line found:', { id: line.id, name: line.name });
+            console.log('   Machines:', line.machines.map(m => ({ id: m.id, name: m.name })));
+
+            const machineIds = line.machines.map(m => m.id);
+            if (machineIds.length === 0) {
+                return res.status(400).json({ message: "No machines found for this line" });
+            }
+
+            // Get machine state tags
+            console.log('\n🔍 Step 3: Finding Machine State Tags...');
+            const machineStateTags = await Tags.findAll({
+                where: {
+                    taggableId: { [Op.in]: machineIds },
+                    taggableType: "machine",
+                    ref: TagRefs.MACHINE_STATE
+                },
+                attributes: ["id", "name", "ref", "taggableId"],
+                raw: true
+            });
+
+            console.log('✅ Machine State Tags found:', machineStateTags.length);
+            machineStateTags.forEach(tag => {
+                const machine = line.machines.find(m => m.id === tag.taggableId);
+                console.log(`   - Tag ${tag.id}: ${tag.name} (Machine: ${machine?.name})`);
+            });
+
+            if (machineStateTags.length === 0) {
+                console.log('❌ ERROR: No machine state tags found');
+                return res.status(404).json({ 
+                    message: "No machine state tags found for machines"
+                });
+            }
+
+            // Create machine name mapping
+            const machineMap = {};
+            line.machines.forEach(machine => {
+                machineMap[machine.id] = machine.name;
+            });
+
+            const tagMachineMapping = {};
+            machineStateTags.forEach(tag => {
+                tagMachineMapping[tag.id] = {
+                    machineId: tag.taggableId,
+                    machineName: machineMap[tag.taggableId] || `Machine ${tag.taggableId}`,
+                    tagName: tag.name
+                };
+            });
+
+            // Fetch tag values for job duration
+            console.log('\n🔍 Step 4: Fetching Tag Values (Job Duration)...');
+            console.log('   Time range:', {
+                start: job.actualStartTime,
+                end: job.actualEndTime
+            });
+
+            const timelineData = [];
+
+            // Process each machine's state tags
+            for (const tag of machineStateTags) {
+                const mapping = tagMachineMapping[tag.id];
+                const displayName = mapping.machineName;
+
+                const tagValues = await TagValues.findAll({
+                    where: {
+                        tagId: tag.id,
+                        createdAt: {
+                            [Op.between]: [job.actualStartTime, job.actualEndTime]
+                        }
+                    },
+                    order: [['createdAt', 'ASC']],
+                    attributes: ["id", "tagId", "value", "createdAt"],
+                    raw: true
+                });
+
+                console.log(`   Machine ${displayName}: ${tagValues.length} state changes`);
+
+                // If no tag values, show "No Data" for entire job
+                if (tagValues.length === 0) {
+                    timelineData.push([
+                        displayName,
+                        NO_DATA_LABEL,
+                        NO_DATA_COLOR,
+                        job.actualStartTime,
+                        job.actualEndTime
+                    ]);
+                    continue;
+                }
+
+                // Fill gap at start if needed
+                if (new Date(tagValues[0].createdAt) > new Date(job.actualStartTime)) {
+                    timelineData.push([
+                        displayName,
+                        NO_DATA_LABEL,
+                        NO_DATA_COLOR,
+                        job.actualStartTime,
+                        tagValues[0].createdAt
+                    ]);
+                }
+
+                // Process state changes
+                let previousValue = tagValues[0].value;
+                let startTime = tagValues[0].createdAt;
+
+                for (let i = 1; i < tagValues.length; i++) {
+                    const currentValue = tagValues[i].value;
+                    const currentTime = tagValues[i].createdAt;
+
+                    if (currentValue !== previousValue) {
+                        // End previous state 1ms before next state starts
+                        const endTime = dayjs(currentTime).subtract(1, 'millisecond').toDate();
+
+                        timelineData.push([
+                            displayName,
+                            STATE_CONFIG.getStateLabel(previousValue),
+                            STATE_CONFIG.getStateColorByCode(previousValue),
+                            startTime,
+                            endTime
+                        ]);
+
+                        previousValue = currentValue;
+                        startTime = currentTime;
+                    }
+                }
+
+                // Push last segment
+                const lastEndTime = tagValues[tagValues.length - 1].createdAt;
+                timelineData.push([
+                    displayName,
+                    STATE_CONFIG.getStateLabel(previousValue),
+                    STATE_CONFIG.getStateColorByCode(previousValue),
+                    startTime,
+                    lastEndTime
+                ]);
+
+                // Fill gap at end if needed
+                if (new Date(lastEndTime) < new Date(job.actualEndTime)) {
+                    timelineData.push([
+                        displayName,
+                        NO_DATA_LABEL,
+                        NO_DATA_COLOR,
+                        lastEndTime,
+                        job.actualEndTime
+                    ]);
+                }
+            }
+
+            // Build response
+            const chartData = [
+                [
+                    { type: "string", id: "Machine" },
+                    { type: "string", id: "Status" },
+                    { type: "string", role: "style" },
+                    { type: "date", id: "Start" },
+                    { type: "date", id: "End" }
+                ],
+                ...timelineData
+            ];
+
+            const response = {
+                data: chartData,
+                job: {
+                    id: job.id,
+                    actualStartTime: job.actualStartTime,
+                    actualEndTime: job.actualEndTime,
+                    programId: job.programId
+                },
+                line: {
+                    id: line.id,
+                    name: line.name
+                },
+                machines: line.machines.map(m => ({
+                    id: m.id,
+                    name: m.name
+                }))
+            };
+
+            console.log('\n✅ Historical Gantt Response Generated:');
+            console.log('   Chart rows:', chartData.length - 1, '(excluding header)');
+            console.log('   Machine count:', line.machines.length);
+            console.log('   Job duration:', {
+                start: job.actualStartTime,
+                end: job.actualEndTime
+            });
+            console.log('=== Report Historical Gantt Chart Query Completed ===\n');
+
+            res.json(response);
+        } catch (error) {
+            console.error("Error executing Report Historical Gantt Chart query:", error);
+            res.status(500).json({ message: "Server error during data retrieval" });
+        }
     }
 };

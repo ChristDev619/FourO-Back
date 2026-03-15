@@ -19,6 +19,7 @@ router.get('/:id', reportController.getReportById);
 router.get('/:id/data', reportController.getReportData);
 router.get('/:id/data/live', reportController.getLiveReportData); // NEW: Live report endpoint for running jobs
 router.get('/:id/gantt/live', reportController.getLiveGanttData); // NEW: Live Gantt chart for running jobs
+router.get('/:id/gantt/historical', reportController.getHistoricalGanttData); // NEW: Historical Gantt chart for completed jobs
 router.get('/:id/skus', reportController.getAvailableSkus);
 router.put('/:id', reportController.updateReport);
 router.put('/reorder', reportController.reorderReports);
