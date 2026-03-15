@@ -468,17 +468,21 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
         console.log(`[LIVE SKU] Final effectiveSkuId: ${effectiveSkuId ?? 'null'}\n`);
     }
 
-    const fillerCount = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.BOTTLES_COUNT, job.actualStartTime, effectiveEndTime, program, isLiveMode);
+    // FIX: For live reports, use Job dates consistently (don't override with program dates)
+    // For historical reports, keep existing behavior (use program dates)
+    const programForTags = isLiveMode ? null : program;
+    
+    const fillerCount = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.BOTTLES_COUNT, job.actualStartTime, effectiveEndTime, programForTags, isLiveMode);
     console.log(`[REPORT] Filler Count (bc): ${fillerCount}`);
     
-    const fillerCountAqua = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.BLOWERINPUT, job.actualStartTime, effectiveEndTime, program, isLiveMode);
+    const fillerCountAqua = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.BLOWERINPUT, job.actualStartTime, effectiveEndTime, programForTags, isLiveMode);
 
     console.log(`[REPORT] FillerAqua Count (bc): ${fillerCountAqua}`);
 
-    let bottlesLost = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.REJECTED_BOTTLES, job.actualStartTime, effectiveEndTime, program, isLiveMode);
+    let bottlesLost = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.REJECTED_BOTTLES, job.actualStartTime, effectiveEndTime, programForTags, isLiveMode);
     console.log(`[REPORT] Bottles Lost (lost): ${bottlesLost}`);
     
-    const palletsCount = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.PALLET_COUNT, job.actualStartTime, effectiveEndTime, program, isLiveMode);
+    const palletsCount = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.PALLET_COUNT, job.actualStartTime, effectiveEndTime, programForTags, isLiveMode);
     console.log(`[REPORT] Pallets Count (pltsct): ${palletsCount}`);
 
     // Get SKU configuration for production calculation
@@ -491,14 +495,15 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
         }
     }
 
-    // Calculate net production using smart fallback (csct → bc) - uses program dates for csct/bc tags
+    // Calculate net production using smart fallback (csct → bc)
+    // FIX: For live reports, use Job dates consistently (don't override with program dates)
     const productionResult = await getProductionCountWithFallback(
         { Tags, TagValues, Op }, 
         line.id, 
         job.actualStartTime, 
         effectiveEndTime,
         numberOfContainersPerPack,
-        program,
+        programForTags,  // null for live, program for historical
         isLiveMode
     );
     
@@ -2428,6 +2433,113 @@ module.exports = {
         } catch (error) {
             console.error("Error executing Report Historical Gantt Chart query:", error);
             res.status(500).json({ message: "Server error during data retrieval" });
+        }
+    },
+
+    // DEBUG: Timezone diagnostic endpoint to check production environment
+    debugTimezone: async (req, res) => {
+        try {
+            console.log('\n=== TIMEZONE DEBUG ENDPOINT CALLED ===');
+            
+            // 1. Check Node.js Server Time
+            const serverTime = new Date();
+            const serverTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            
+            // 2. Check MySQL Database Time
+            const dbTimeCheck = await sequelize.query(
+                `SELECT 
+                    @@global.time_zone as global_tz,
+                    @@session.time_zone as session_tz,
+                    NOW() as db_now,
+                    UTC_TIMESTAMP() as db_utc,
+                    TIMESTAMPDIFF(HOUR, UTC_TIMESTAMP(), NOW()) as offset_hours
+                `,
+                { type: QueryTypes.SELECT }
+            );
+            
+            // 3. Check if there's a running job to test duration calculation
+            const runningJob = await Job.findOne({ 
+                where: { actualEndTime: null },
+                order: [['actualStartTime', 'DESC']],
+                include: [{ model: Program, as: 'program' }],
+                raw: false
+            });
+            
+            let jobDiagnostic = null;
+            if (runningJob) {
+                const program = runningJob.program;
+                const effectiveEndTime = new Date();
+                
+                const jobDuration = dayjs(effectiveEndTime).diff(dayjs(runningJob.actualStartTime), 'minute');
+                const programDuration = program?.startDate ? dayjs(effectiveEndTime).diff(dayjs(program.startDate), 'minute') : null;
+                const timeDiff = program?.startDate ? dayjs(runningJob.actualStartTime).diff(dayjs(program.startDate), 'hour', true) : null;
+                
+                jobDiagnostic = {
+                    jobId: runningJob.id,
+                    programId: program?.id,
+                    jobActualStartTime: runningJob.actualStartTime,
+                    programStartDate: program?.startDate,
+                    timeDifferenceHours: timeDiff,
+                    currentTime: effectiveEndTime.toISOString(),
+                    jobDurationMinutes: jobDuration,
+                    jobDurationHours: (jobDuration / 60).toFixed(2),
+                    programDurationMinutes: programDuration,
+                    programDurationHours: programDuration ? (programDuration / 60).toFixed(2) : null,
+                    durationMismatch: programDuration && jobDuration ? (programDuration - jobDuration) : null,
+                    warning: Math.abs(timeDiff || 0) > 1 ? '⚠️ Job and Program start times differ by >1 hour - possible duration calculation bug!' : null
+                };
+            }
+            
+            // 4. Build comprehensive diagnostic response
+            const diagnostic = {
+                timestamp: new Date().toISOString(),
+                environment: 'production',
+                server: {
+                    nodeJsTime: serverTime.toISOString(),
+                    timezone: serverTimezone,
+                    processEnvTZ: process.env.TZ || 'not set'
+                },
+                database: {
+                    globalTimezone: dbTimeCheck[0].global_tz,
+                    sessionTimezone: dbTimeCheck[0].session_tz,
+                    nowFunction: dbTimeCheck[0].db_now,
+                    utcTimestamp: dbTimeCheck[0].db_utc,
+                    offsetFromUtcHours: dbTimeCheck[0].offset_hours,
+                    interpretation: dbTimeCheck[0].offset_hours === 0 
+                        ? '✅ NOW() returns UTC time' 
+                        : `⚠️ NOW() returns local time with ${dbTimeCheck[0].offset_hours}h offset`
+                },
+                sequelize: {
+                    configuredTimezone: '+00:00'
+                },
+                runningJobTest: jobDiagnostic,
+                recommendations: []
+            };
+            
+            // Add recommendations based on findings
+            if (dbTimeCheck[0].offset_hours !== 0) {
+                diagnostic.recommendations.push('⚠️ MySQL NOW() is not returning UTC - this causes duration calculation errors');
+                diagnostic.recommendations.push('Fix: Ensure MySQL session timezone is +00:00 in Sequelize config');
+            }
+            
+            if (jobDiagnostic?.timeDifferenceHours && Math.abs(jobDiagnostic.timeDifferenceHours) > 1) {
+                diagnostic.recommendations.push(`⚠️ Job starts ${jobDiagnostic.timeDifferenceHours.toFixed(2)}h after Program - this causes production count vs duration mismatch`);
+                diagnostic.recommendations.push('Fix: Use consistent date source (either Job dates OR Program dates for both counts and duration)');
+            }
+            
+            if (diagnostic.recommendations.length === 0) {
+                diagnostic.recommendations.push('✅ No timezone issues detected');
+            }
+            
+            console.log('Diagnostic Results:', JSON.stringify(diagnostic, null, 2));
+            
+            res.status(200).json(diagnostic);
+        } catch (error) {
+            console.error('Error in timezone debug endpoint:', error);
+            res.status(500).json({ 
+                error: error.message,
+                stack: error.stack 
+            });
         }
     }
 };

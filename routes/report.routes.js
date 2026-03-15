@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const reportController = require('../controllers/report.controller');
 
+// DEBUG: Timezone diagnostic endpoint (can be accessed in production)
+router.get('/debug/timezone', reportController.debugTimezone);
+
 // Existing routes
 router.post('/', reportController.createReport);
 router.get('/', reportController.getAllReports);
