@@ -24,6 +24,7 @@ const {
     Settings,
 } = require("../dbInit");
 const dayjs = require("dayjs");
+const { LIVE_REPORT_WALL_TIMEZONE, liveInstantFromDbDate } = require("../utils/liveReportTime");
 const { QueryTypes } = require("sequelize");
 const TagRefs = require("../utils/constants/TagRefs");
 const STATE_CONFIG = require("../utils/constants/StateConfig");
@@ -611,8 +612,10 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
             console.log('[LIVE REPORT] Calculating estimated True Efficiency');
             
             try {
+                const jobStartLive = liveInstantFromDbDate(job.actualStartTime) || dayjs(job.actualStartTime);
+                const programStartLive = liveInstantFromDbDate(program.startDate) || dayjs(program.startDate);
                 // Calculate current production time from job start to NOW (for live reports)
-                const productionTime = dayjs(new Date()).diff(dayjs(job.actualStartTime), 'minute');
+                const productionTime = dayjs(new Date()).diff(jobStartLive, 'minute');
                 
                 // Use calculateVOTProgram() to match historical True Efficiency calculation
                 // Note: ProgramDuration parameter is passed but not used in calculation (same as historical)
@@ -620,7 +623,7 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
                 
                 // Calculate program duration from program start to NOW
                 // Only use program data, not job data
-                const programDuration = dayjs(new Date()).diff(dayjs(program.startDate), 'minute');
+                const programDuration = dayjs(new Date()).diff(programStartLive, 'minute');
                 
                 // True Efficiency = (VOT / Program Duration) * 100
                 // Net Efficiency = (VOT / Job Duration) * 100
@@ -637,7 +640,7 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
                 };
                 
                 // Calculate job duration for comparison (actualStartTime to NOW for live reports)
-                const jobDuration = dayjs(new Date()).diff(dayjs(job.actualStartTime), 'minute');
+                const jobDuration = dayjs(new Date()).diff(jobStartLive, 'minute');
                 console.log(`[LIVE REPORT] Estimated True Efficiency: ${trueEfficiency}% (VOT: ${votProgram}, Program Duration: ${programDuration} min, Job Duration: ${jobDuration} min)`);
                 console.log(`[LIVE REPORT] Using calculateVOTProgram() to match historical calculation method`);
                 console.log(`[LIVE REPORT] Net Efficiency uses Job Duration, True Efficiency uses Program Duration`);
@@ -648,7 +651,8 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
                 // Fall back to using metrics.vot if calculateVOTProgram fails
                 console.warn('[LIVE REPORT] Falling back to metrics.vot from calculateMetrics()');
                 const votProgram = metrics.vot || 0;
-                const programDuration = dayjs(new Date()).diff(dayjs(program.startDate), 'minute');
+                const programStartLiveFb = liveInstantFromDbDate(program.startDate) || dayjs(program.startDate);
+                const programDuration = dayjs(new Date()).diff(programStartLiveFb, 'minute');
                 const trueEfficiency = programDuration > 0 
                     ? parseFloat(((votProgram / programDuration) * 100).toFixed(2)) 
                     : 0;
@@ -675,7 +679,10 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     }
     
     // Calculate duration using effectiveEndTime (NOW() for live, actualEndTime for completed)
-    const duration = dayjs(effectiveEndTime).diff(dayjs(job.actualStartTime), "minute");
+    const durationStart = isLiveMode
+        ? (liveInstantFromDbDate(job.actualStartTime) || dayjs(job.actualStartTime))
+        : dayjs(job.actualStartTime);
+    const duration = dayjs(effectiveEndTime).diff(durationStart, "minute");
     
     if (isLiveMode) {
         console.log(`[LIVE REPORT] Duration calculated: ${duration} minutes (from start to NOW)`);
@@ -1603,10 +1610,10 @@ module.exports = {
             console.log('Duration:', jobData.duration, 'minutes');
             console.log('Net Production:', jobData.netProduction);
 
-            // Calculate program duration (for running jobs, use start to NOW)
+            // Calculate program duration (for running jobs, use start to NOW; wall-time aware for live)
             let programDuration = null;
             if (program?.startDate) {
-                const programStart = dayjs(program.startDate);
+                const programStart = liveInstantFromDbDate(program.startDate) || dayjs(program.startDate);
                 const now = dayjs();
                 if (programStart.isValid()) {
                     programDuration = Math.max(0, now.diff(programStart, 'minute'));
@@ -2469,10 +2476,13 @@ module.exports = {
             if (runningJob) {
                 const program = runningJob.program;
                 const effectiveEndTime = new Date();
-                
-                const jobDuration = dayjs(effectiveEndTime).diff(dayjs(runningJob.actualStartTime), 'minute');
-                const programDuration = program?.startDate ? dayjs(effectiveEndTime).diff(dayjs(program.startDate), 'minute') : null;
-                const timeDiff = program?.startDate ? dayjs(runningJob.actualStartTime).diff(dayjs(program.startDate), 'hour', true) : null;
+                const jobStartDbg = liveInstantFromDbDate(runningJob.actualStartTime) || dayjs(runningJob.actualStartTime);
+                const progStartDbg = program?.startDate
+                    ? (liveInstantFromDbDate(program.startDate) || dayjs(program.startDate))
+                    : null;
+                const jobDuration = dayjs(effectiveEndTime).diff(jobStartDbg, 'minute');
+                const programDuration = progStartDbg ? dayjs(effectiveEndTime).diff(progStartDbg, 'minute') : null;
+                const timeDiff = progStartDbg ? jobStartDbg.diff(progStartDbg, 'hour', true) : null;
                 
                 jobDiagnostic = {
                     jobId: runningJob.id,
@@ -2510,7 +2520,8 @@ module.exports = {
                         : `⚠️ NOW() returns local time with ${dbTimeCheck[0].offset_hours}h offset`
                 },
                 sequelize: {
-                    configuredTimezone: '+00:00'
+                    configuredTimezone: '+00:00',
+                    liveReportWallTimezone: LIVE_REPORT_WALL_TIMEZONE,
                 },
                 runningJobTest: jobDiagnostic,
                 recommendations: []

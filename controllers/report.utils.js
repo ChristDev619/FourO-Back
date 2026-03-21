@@ -346,9 +346,16 @@ function prepareParetoData(statesResults) {
 // Helper: Prepare waterfall chart data
 function prepareWaterfallData(program, job, metrics, isLiveMode = false) {
     const dayjs = require("dayjs");
+    const { liveInstantFromDbDate } = require("../utils/liveReportTime");
     const programStart = dayjs(program?.startDate);
     const programEnd = dayjs(program?.endDate);
     const jobStart = dayjs(job.actualStartTime);
+    const programStartLive = isLiveMode
+        ? (liveInstantFromDbDate(program?.startDate) || programStart)
+        : programStart;
+    const jobStartLive = isLiveMode
+        ? (liveInstantFromDbDate(job.actualStartTime) || jobStart)
+        : jobStart;
     const now = dayjs(new Date());
     
     // For live reports: use NOW() as job end time; for historical: use actualEndTime
@@ -357,15 +364,15 @@ function prepareWaterfallData(program, job, metrics, isLiveMode = false) {
     // Program Duration: For live, calculate from program start to NOW; for historical, use program dates
     let programDuration;
     if (isLiveMode) {
-        // Live mode: Calculate from program start to current time
-        programDuration = programStart.isValid() ? Math.max(0, now.diff(programStart, "minute")) : 0;
+        // Live mode: Calculate from program start to current time (wall-clock aware)
+        programDuration = programStartLive.isValid() ? Math.max(0, now.diff(programStartLive, "minute")) : 0;
     } else {
         // Historical mode: Use original logic (program end - program start)
         programDuration = programEnd.diff(programStart, "minute");
     }
     
-    // Start Up Time: Same calculation for both modes
-    const startUpTime = jobStart.diff(programStart, "minute");
+    // Start Up Time: Same calculation for both modes (live uses wall-clock-aware starts)
+    const startUpTime = jobStartLive.diff(programStartLive, "minute");
     
     // Run Down Time: For live reports, set to 0 (can't calculate until job ends)
     // For historical reports, use original calculation
@@ -379,7 +386,7 @@ function prepareWaterfallData(program, job, metrics, isLiveMode = false) {
     // Production Time: For live, use start to NOW; for historical, use actual times
     let productionTime;
     if (isLiveMode) {
-        productionTime = jobStart.isValid() ? Math.max(0, now.diff(jobStart, "minute")) : 0;
+        productionTime = jobStartLive.isValid() ? Math.max(0, now.diff(jobStartLive, "minute")) : 0;
     } else {
         productionTime = jobEnd.diff(jobStart, "minute");
     }
