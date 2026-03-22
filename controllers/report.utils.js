@@ -116,10 +116,11 @@ async function getTagValuesDifference({ Tags, TagValues, Op }, lineId, tagRef, s
  * Smart Production Counter with Intelligent Fallback
  * 
  * Handles different line configurations:
- * - Krones lines: Use CASE_COUNT (csct) → multiply by numberOfContainersPerPack
+ * - Krones lines: Use FILLER_OUTPUT (fillerout) → direct bottle count from filler
+ * - Fallback to CASE_COUNT (csct) → multiply by numberOfContainersPerPack
  * - Bardi lines: Use BOTTLES_COUNT (bc) → use directly
  * 
- * For csct and bc tags, uses program dates instead of job dates when program is provided.
+ * For production tags, uses program dates instead of job dates when program is provided.
  * 
  * @param {Object} deps - Dependencies { Tags, TagValues, Op }
  * @param {number} lineId - Line ID
@@ -127,11 +128,11 @@ async function getTagValuesDifference({ Tags, TagValues, Op }, lineId, tagRef, s
  * @param {Date} endTime - End time for measurement
  * @param {number} numberOfContainersPerPack - Bottles per case (from SKU)
  * @param {Object} program - Program object with startDate and endDate (required)
- * @returns {Promise<Object>} { bottleCount: number, method: 'csct'|'bc', source: string }
+ * @returns {Promise<Object>} { bottleCount: number, method: 'fillerout'|'csct'|'bc', source: string }
  */
 async function getProductionCountWithFallback({ Tags, TagValues, Op }, lineId, startTime, endTime, numberOfContainersPerPack = 1, program, isLiveMode = false) {
     try {
-        // For csct and bc tags, use program dates instead of job dates
+        // For production tags, use program dates instead of job dates
         let actualStartTime = startTime;
         let actualEndTime = endTime;
         let usingProgramDates = false;
@@ -167,7 +168,57 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op }, lineId, s
             console.log(`  Program ID: ${program.id}`);
         }
         
-        // ATTEMPT 1: Try CASE_COUNT first (standard for most lines)
+        // ATTEMPT 1: Try FILLER_OUTPUT first (Krones lines - filler bottle output)
+        const fillerOutputTag = await Tags.findOne({
+            where: {
+                taggableId: lineId,
+                taggableType: 'line',
+                ref: TagRefs.FILLER_OUTPUT
+            }
+        });
+
+        if (fillerOutputTag) {
+            const firstValue = await TagValues.findOne({
+                where: { tagId: fillerOutputTag.id, createdAt: { [Op.gte]: actualStartTime } },
+                order: [['createdAt', 'ASC']]
+            });
+            
+            // For LIVE reports: Get the absolute LATEST tag value
+            let lastValue;
+            if (isLive) {
+                lastValue = await TagValues.findOne({
+                    where: { 
+                        tagId: fillerOutputTag.id,
+                        createdAt: { [Op.gte]: actualStartTime }
+                    },
+                    order: [['createdAt', 'DESC']]
+                });
+            } else {
+                lastValue = await TagValues.findOne({
+                    where: { tagId: fillerOutputTag.id, createdAt: { [Op.lte]: actualEndTime } },
+                    order: [['createdAt', 'DESC']]
+                });
+            }
+
+            if (firstValue && lastValue) {
+                const bottleCount = parseFloat(lastValue.value) - parseFloat(firstValue.value);
+                
+                console.log(`✓ Production Counter [Line ${lineId}]: Using FILLER_OUTPUT (fillerout) - ${bottleCount} bottles (direct from filler)`);
+                console.log(`  First Value: ${firstValue.value} (at ${firstValue.createdAt})`);
+                console.log(`  Last Value: ${lastValue.value} (at ${lastValue.createdAt})`);
+                console.log(`  Bottle Count: ${bottleCount}`);
+                
+                return {
+                    bottleCount,
+                    casesCount: 0, // Not applicable for direct bottle counting
+                    method: 'fillerout',
+                    source: 'FILLER_OUTPUT',
+                    multiplier: 1
+                };
+            }
+        }
+
+        // ATTEMPT 2: Fallback to CASE_COUNT (packer-based - legacy Krones behavior)
         const caseCountTag = await Tags.findOne({
             where: {
                 taggableId: lineId,
@@ -203,7 +254,7 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op }, lineId, s
                 const casesCount = parseFloat(lastValue.value) - parseFloat(firstValue.value);
                 const bottleCount = casesCount * numberOfContainersPerPack;
                 
-                console.log(`✓ Production Counter [Line ${lineId}]: Using CASE_COUNT (csct) - ${casesCount} cases × ${numberOfContainersPerPack} = ${bottleCount} bottles`);
+                console.log(`✓ Production Counter [Line ${lineId}]: Using CASE_COUNT (csct) fallback - ${casesCount} cases × ${numberOfContainersPerPack} = ${bottleCount} bottles`);
                 console.log(`  First Value: ${firstValue.value} (at ${firstValue.createdAt})`);
                 console.log(`  Last Value: ${lastValue.value} (at ${lastValue.createdAt})`);
                 console.log(`  Cases Count: ${casesCount}, Bottle Count: ${bottleCount}`);
@@ -218,7 +269,7 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op }, lineId, s
             }
         }
 
-        // ATTEMPT 2: Fallback to BOTTLE_COUNT (direct bottle counter - e.g., Bardi lines)
+        // ATTEMPT 3: Fallback to BOTTLE_COUNT (direct bottle counter - e.g., Bardi lines)
         const bottleCountTag = await Tags.findOne({
             where: {
                 taggableId: lineId,
@@ -269,7 +320,7 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op }, lineId, s
         }
 
         // FAILURE: No suitable production counter found
-        console.warn(`⚠ Production Counter [Line ${lineId}]: No CASE_COUNT or BOTTLE_COUNT tag found. Returning 0.`);
+        console.warn(`⚠ Production Counter [Line ${lineId}]: No FILLER_OUTPUT, CASE_COUNT, or BOTTLE_COUNT tag found. Returning 0.`);
         return {
             bottleCount: 0,
             casesCount: 0,

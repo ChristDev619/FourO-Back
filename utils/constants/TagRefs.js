@@ -18,6 +18,7 @@ const TagRefs = {
   BOTTLES_PLANNED: "bp",
   BATCH_ACTIVE: "bac",
   BLOWERINPUT: "bc1",
+  FILLER_OUTPUT: "fillerout",
 };
 
 Object.freeze(TagRefs); // Optional safety against accidental mutation

@@ -292,28 +292,46 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
       }
     }
 
-    // Get tag for production counter with intelligent fallback (csct → bc)
+    // Get tag for production counter with intelligent fallback (fillerout → csct → bc)
     let tag = null;
     let tagCacheKey = null;
     let productionCounterType = null; // Track which type we're using
     
-    // ATTEMPT 1: Try CASE_COUNT first (standard - e.g., Krones lines)
-    tagCacheKey = `tag_line_${lineId}_csct`;
+    // ATTEMPT 1: Try FILLER_OUTPUT first (Krones lines - filler bottle output)
+    tagCacheKey = `tag_line_${lineId}_fillerout`;
     tag = cache.tags[tagCacheKey];
     
     if (!tag) {
       tag = await Tags.findOne({
-        where: { taggableType: "line", taggableId: lineId, ref: TagRefs.CASE_COUNT },
+        where: { taggableType: "line", taggableId: lineId, ref: TagRefs.FILLER_OUTPUT },
       });
       if (tag) {
         cache.tags[tagCacheKey] = tag;
-        productionCounterType = 'csct';
+        productionCounterType = 'fillerout';
       }
     } else {
-      productionCounterType = 'csct';
+      productionCounterType = 'fillerout';
     }
     
-    // ATTEMPT 2: Fallback to BOTTLE_COUNT if CASE_COUNT not found (e.g., Bardi lines)
+    // ATTEMPT 2: Fallback to CASE_COUNT if FILLER_OUTPUT not found (legacy Krones behavior)
+    if (!tag) {
+      tagCacheKey = `tag_line_${lineId}_csct`;
+      tag = cache.tags[tagCacheKey];
+      
+      if (!tag) {
+        tag = await Tags.findOne({
+          where: { taggableType: "line", taggableId: lineId, ref: TagRefs.CASE_COUNT },
+        });
+        if (tag) {
+          cache.tags[tagCacheKey] = tag;
+          productionCounterType = 'csct';
+        }
+      } else {
+        productionCounterType = 'csct';
+      }
+    }
+    
+    // ATTEMPT 3: Fallback to BOTTLE_COUNT if neither found (e.g., Bardi lines)
     if (!tag) {
       tagCacheKey = `tag_line_${lineId}_bc`;
       tag = cache.tags[tagCacheKey];
@@ -331,7 +349,7 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
       }
     }
 
-    if (!tag) throw new Error(`Production counter tag not found for line ${lineId}. Expected CASE_COUNT (csct) or BOTTLE_COUNT (bc).`);
+    if (!tag) throw new Error(`Production counter tag not found for line ${lineId}. Expected FILLER_OUTPUT (fillerout), CASE_COUNT (csct), or BOTTLE_COUNT (bc).`);
 
     // Fetch production counter tag values (tagValues) before using it
     const tagValuesCacheKey = `tagvalues_${tag.id}_${jobStart.toISOString()}_${jobEnd.toISOString()}`;
@@ -441,7 +459,15 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
     let totalNetProduction = 0;
     let totalCaseCount = 0;
     
-    if (productionCounterType === 'csct') {
+    if (productionCounterType === 'fillerout') {
+      // FILLER_OUTPUT: Use directly (already in bottles from filler)
+      totalNetProduction = lastTagValueNumber - batchStartValue;
+      totalCaseCount = 0; // Not applicable for direct bottle counting
+      
+      if (totalNetProduction < 0) {
+        console.error(`❌ ERROR: Negative filler output count difference! Counter reset detected.`);
+      }
+    } else if (productionCounterType === 'csct') {
       // CASE_COUNT: Calculate cases, then multiply by containers per pack
       totalCaseCount = lastTagValueNumber - batchStartValue;
       totalNetProduction = totalCaseCount * numberOfContainersPerPack;
@@ -530,7 +556,10 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
           let currentValue = 0;
           let caseCount = 0;
           
-          if (productionCounterType === 'csct') {
+          if (productionCounterType === 'fillerout') {
+            // FILLER_OUTPUT: Use directly (already in bottles from filler)
+            currentValue = lastSeenValueForMinute - batchStartValue;
+          } else if (productionCounterType === 'csct') {
             // CASE_COUNT: Calculate cases, then multiply by containers per pack
             caseCount = lastSeenValueForMinute - batchStartValue;
             currentValue = caseCount * numberOfContainersPerPack;

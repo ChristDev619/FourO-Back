@@ -25,6 +25,7 @@ const {
 } = require("../dbInit");
 const dayjs = require("dayjs");
 const { LIVE_REPORT_WALL_TIMEZONE, liveInstantFromDbDate } = require("../utils/liveReportTime");
+const { parseGanttTimeWindow, calculateGanttTimeWindow, GANTT_ZOOM_CONFIG } = require("../utils/ganttTimeWindow");
 const { QueryTypes } = require("sequelize");
 const TagRefs = require("../utils/constants/TagRefs");
 const STATE_CONFIG = require("../utils/constants/StateConfig");
@@ -1865,6 +1866,22 @@ module.exports = {
                 isRunningJob: config.isRunningJob
             }, null, 2));
 
+            // ZOOM SLIDER: Parse and validate time window parameter
+            const timeWindowResult = parseGanttTimeWindow(req.query.hoursBack);
+            if (!timeWindowResult.isValid) {
+                console.log('⚠️  Invalid hoursBack parameter:', timeWindowResult.error);
+                console.log('   Using fallback:', timeWindowResult.hoursBack, 'hours');
+            }
+            const hoursBack = timeWindowResult.hoursBack;
+            const isDefaultZoom = timeWindowResult.isDefault;
+
+            console.log('🔍 Zoom Configuration:', { 
+                hoursBack, 
+                isDefault: isDefaultZoom,
+                source: req.query.hoursBack ? `query parameter (${req.query.hoursBack})` : 'default (4 hours)',
+                allowedRange: `${GANTT_ZOOM_CONFIG.MIN_HOURS} - ${GANTT_ZOOM_CONFIG.MAX_HOURS} hours`
+            });
+
             // Get line from config or job (works like dashboard - no running job required)
             let lineId = config.selectedLineId;
             let job = null;
@@ -1950,16 +1967,21 @@ module.exports = {
 
             // Get current time from database
             console.log('\n🔍 Step 3: Getting Time Range...');
-            const dbNowResult = await sequelize.query('SELECT NOW() as now, NOW() as fourHoursAgo', { 
+            const dbNowResult = await sequelize.query('SELECT NOW() as now', { 
                 type: sequelize.QueryTypes.SELECT 
             });
             const now = new Date(dbNowResult[0].now);
-            const fourHoursAgo = new Date(new Date(dbNowResult[0].fourHoursAgo).getTime() - 4 * 60 * 60 * 1000);
+            
+            // ZOOM SLIDER: Calculate dynamic time window based on hoursBack parameter
+            const timeWindow = calculateGanttTimeWindow(now, hoursBack);
+            const startTime = timeWindow.startTime;
 
-            console.log('⏰ Time Range:', {
+            console.log('⏰ Time Range (Dynamic Zoom):', {
                 now: now.toISOString(),
-                fourHoursAgo: fourHoursAgo.toISOString(),
-                duration: '4 hours'
+                startTime: startTime.toISOString(),
+                hoursBack: hoursBack,
+                durationMinutes: (timeWindow.durationMs / 60000).toFixed(1),
+                zoomLevel: isDefaultZoom ? 'default' : 'custom'
             });
 
             // Get machine state tags (NO filtering - include ALL machines like dashboard)
@@ -1993,13 +2015,13 @@ module.exports = {
                 });
             }
 
-            // Get tag values for the last 4 hours (to match dashboard behavior)
-            console.log('\n🔍 Step 5: Fetching Tag Values (Last 4 Hours)...');
+            // Get tag values for the dynamic time window (zoom slider)
+            console.log(`\n🔍 Step 5: Fetching Tag Values (Last ${hoursBack} Hours)...`);
             const tagValues = await TagValues.findAll({
                 where: {
                     tagId: { [Op.in]: machineStateTags.map(tag => tag.id) },
                     createdAt: {
-                        [Op.gte]: sequelize.literal('DATE_SUB(NOW(), INTERVAL 4 HOUR)')
+                        [Op.gte]: sequelize.literal(`DATE_SUB(NOW(), INTERVAL ${hoursBack} HOUR)`)
                     }
                 },
                 order: [['createdAt', 'ASC']],
@@ -2007,7 +2029,11 @@ module.exports = {
                 raw: true
             });
 
-            console.log('✅ Tag Values Found:', tagValues.length);
+            console.log('✅ Tag Values Found:', {
+                count: tagValues.length,
+                timeWindow: `${hoursBack} hours`
+            });
+            
             if (tagValues.length > 0) {
                 const firstValue = tagValues[0];
                 const lastValue = tagValues[tagValues.length - 1];
@@ -2022,7 +2048,7 @@ module.exports = {
                     value: lastValue.value 
                 });
             } else {
-                console.log('   ⚠️  No tag values in last 4 hours');
+                console.log(`   ⚠️  No tag values in last ${hoursBack} hours`);
             }
 
             // Get the latest timestamp
@@ -2133,8 +2159,16 @@ module.exports = {
                     name: line.name
                 },
                 timeRange: {
-                    start: fourHoursAgo,
-                    end: latestTimestamp
+                    start: startTime,
+                    end: latestTimestamp,
+                    hoursBack: hoursBack,
+                    zoomConfig: {
+                        current: hoursBack,
+                        default: GANTT_ZOOM_CONFIG.DEFAULT_HOURS,
+                        min: GANTT_ZOOM_CONFIG.MIN_HOURS,
+                        max: GANTT_ZOOM_CONFIG.MAX_HOURS,
+                        recommendedLevels: GANTT_ZOOM_CONFIG.RECOMMENDED_LEVELS
+                    }
                 },
                 machines: machines.map(m => ({
                     id: m.id,
@@ -2146,12 +2180,15 @@ module.exports = {
             console.log('\n✅ Live Gantt Response Generated:');
             console.log('   Chart rows:', chartData.length - 1, '(excluding header)');
             console.log('   Machine count:', machines.length);
+            console.log('   Zoom level:', `${hoursBack} hours ${isDefaultZoom ? '(default)' : '(custom)'}`);
             console.log('   Time range:', {
                 start: response.timeRange.start.toISOString(),
-                end: response.timeRange.end.toISOString()
+                end: response.timeRange.end.toISOString(),
+                duration: `${hoursBack} hours`
             });
             console.log('   Line:', response.line);
             console.log('   Job:', response.job ? response.job.id : 'none');
+            console.log('   Data points:', tagValues.length);
             console.log('=== Report Live Gantt Chart Query Completed ===\n');
 
             res.json(response);
