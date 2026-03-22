@@ -5,7 +5,7 @@ const isSameOrAfter = require("dayjs/plugin/isSameOrAfter");
 dayjs.extend(isSameOrAfter);
 const utc = require("dayjs/plugin/utc");
 dayjs.extend(utc);
-const { Job, Tags, TagValues, Op, Sku } = require("../dbInit");
+const { Job, Tags, TagValues, Op, Sku, Line } = require("../dbInit");
 const TagRefs = require("../utils/constants/TagRefs");
 const { getDesignSpeedForJob } = require("../utils/helpers/designSpeedHelper");
 //const fs = require("fs");
@@ -292,12 +292,21 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
       }
     }
 
-    // Get tag for production counter with intelligent fallback (fillerout → csct → bc)
+    // Get line info to determine if it's a Krones line
+    const line = await Line.findByPk(lineId, { attributes: ['id', 'name'] });
+    const lineName = line?.name?.toLowerCase() || '';
+    const isKrones = lineName.includes('krones');
+    
+    console.log(`[OEE CURVE] Line ${lineId} (${line?.name || 'Unknown'}) - ${isKrones ? 'KRONES (no fallbacks)' : 'OTHER (with fallbacks)'}`);
+    
+    // Get tag for production counter with intelligent fallback
+    // Krones: Only try fillerout (no fallbacks)
+    // Other lines: Try fillerout → csct → bc
     let tag = null;
     let tagCacheKey = null;
     let productionCounterType = null; // Track which type we're using
     
-    // ATTEMPT 1: Try FILLER_OUTPUT first (Krones lines - filler bottle output)
+    // ATTEMPT 1: Try FILLER_OUTPUT first (required for Krones, optional for others)
     tagCacheKey = `tag_line_${lineId}_fillerout`;
     tag = cache.tags[tagCacheKey];
     
@@ -313,8 +322,15 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
       productionCounterType = 'fillerout';
     }
     
-    // ATTEMPT 2: Fallback to CASE_COUNT if FILLER_OUTPUT not found (legacy Krones behavior)
+    // For KRONES lines: fillerout is REQUIRED - no fallbacks
+    if (!tag && isKrones) {
+      throw new Error(`Krones line ${lineId} requires FILLER_OUTPUT (fillerout) tag but it was not found.`);
+    }
+    
+    // For NON-KRONES lines: Continue with fallbacks
+    // ATTEMPT 2: Fallback to CASE_COUNT if FILLER_OUTPUT not found
     if (!tag) {
+      console.log(`[OEE CURVE] Line ${lineId}: FILLER_OUTPUT not found, trying CASE_COUNT fallback...`);
       tagCacheKey = `tag_line_${lineId}_csct`;
       tag = cache.tags[tagCacheKey];
       
@@ -333,6 +349,7 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
     
     // ATTEMPT 3: Fallback to BOTTLE_COUNT if neither found (e.g., Bardi lines)
     if (!tag) {
+      console.log(`[OEE CURVE] Line ${lineId}: CASE_COUNT not found, trying BOTTLE_COUNT fallback...`);
       tagCacheKey = `tag_line_${lineId}_bc`;
       tag = cache.tags[tagCacheKey];
       

@@ -116,13 +116,12 @@ async function getTagValuesDifference({ Tags, TagValues, Op }, lineId, tagRef, s
  * Smart Production Counter with Intelligent Fallback
  * 
  * Handles different line configurations:
- * - Krones lines: Use FILLER_OUTPUT (fillerout) → direct bottle count from filler
- * - Fallback to CASE_COUNT (csct) → multiply by numberOfContainersPerPack
- * - Bardi lines: Use BOTTLES_COUNT (bc) → use directly
+ * - Krones lines: Use FILLER_OUTPUT (fillerout) ONLY - no fallbacks
+ * - Other lines (Bardi, etc.): Use intelligent fallback: fillerout → csct → bc
  * 
  * For production tags, uses program dates instead of job dates when program is provided.
  * 
- * @param {Object} deps - Dependencies { Tags, TagValues, Op }
+ * @param {Object} deps - Dependencies { Tags, TagValues, Op, Line }
  * @param {number} lineId - Line ID
  * @param {Date} startTime - Start time for measurement
  * @param {Date} endTime - End time for measurement
@@ -130,8 +129,13 @@ async function getTagValuesDifference({ Tags, TagValues, Op }, lineId, tagRef, s
  * @param {Object} program - Program object with startDate and endDate (required)
  * @returns {Promise<Object>} { bottleCount: number, method: 'fillerout'|'csct'|'bc', source: string }
  */
-async function getProductionCountWithFallback({ Tags, TagValues, Op }, lineId, startTime, endTime, numberOfContainersPerPack = 1, program, isLiveMode = false) {
+async function getProductionCountWithFallback({ Tags, TagValues, Op, Line }, lineId, startTime, endTime, numberOfContainersPerPack = 1, program, isLiveMode = false) {
     try {
+        // Get line info to determine if it's a Krones line
+        const line = Line ? await Line.findByPk(lineId, { attributes: ['id', 'name'] }) : null;
+        const lineName = line?.name?.toLowerCase() || '';
+        const isKrones = lineName.includes('krones');
+        
         // For production tags, use program dates instead of job dates
         let actualStartTime = startTime;
         let actualEndTime = endTime;
@@ -156,7 +160,8 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op }, lineId, s
         }
         
         // Log which dates are being used
-        console.log(`\n[REPORT] getProductionCountWithFallback - Line: ${lineId}`);
+        console.log(`\n[REPORT] getProductionCountWithFallback - Line: ${lineId} (${line?.name || 'Unknown'})`);
+        console.log(`  Line Type: ${isKrones ? 'KRONES (no fallbacks)' : 'OTHER (with fallbacks)'}`);
         console.log(`  Mode: ${isLive ? 'LIVE (get latest values)' : 'HISTORICAL (use end time)'}`);
         console.log(`  Using ${usingProgramDates ? 'PROGRAM' : 'JOB'} dates`);
         console.log(`  Start: ${actualStartTime}`);
@@ -168,7 +173,7 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op }, lineId, s
             console.log(`  Program ID: ${program.id}`);
         }
         
-        // ATTEMPT 1: Try FILLER_OUTPUT first (Krones lines - filler bottle output)
+        // ATTEMPT 1: Try FILLER_OUTPUT first (required for Krones, optional for others)
         const fillerOutputTag = await Tags.findOne({
             where: {
                 taggableId: lineId,
@@ -217,6 +222,22 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op }, lineId, s
                 };
             }
         }
+        
+        // For KRONES lines: fillerout is REQUIRED - no fallbacks
+        if (isKrones) {
+            console.error(`❌ Production Counter [Line ${lineId}]: Krones line requires FILLER_OUTPUT (fillerout) tag - not found!`);
+            return {
+                bottleCount: 0,
+                casesCount: 0,
+                method: 'error',
+                source: 'KRONES_MISSING_FILLEROUT',
+                multiplier: 0,
+                error: `Krones line ${lineId} requires fillerout tag but it was not found`
+            };
+        }
+        
+        // For NON-KRONES lines: Continue with fallbacks
+        console.log(`  [Line ${lineId}] FILLER_OUTPUT not found, trying fallbacks...`);
 
         // ATTEMPT 2: Fallback to CASE_COUNT (packer-based - legacy Krones behavior)
         const caseCountTag = await Tags.findOne({
@@ -319,7 +340,7 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op }, lineId, s
             }
         }
 
-        // FAILURE: No suitable production counter found
+        // FAILURE: No suitable production counter found (non-Krones lines only reach here)
         console.warn(`⚠ Production Counter [Line ${lineId}]: No FILLER_OUTPUT, CASE_COUNT, or BOTTLE_COUNT tag found. Returning 0.`);
         return {
             bottleCount: 0,

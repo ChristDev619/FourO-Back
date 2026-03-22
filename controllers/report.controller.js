@@ -497,10 +497,11 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
         }
     }
 
-    // Calculate net production using smart fallback (csct → bc)
-    // FIX: For live reports, use Job dates consistently (don't override with program dates)
+    // Calculate net production using smart fallback
+    // Krones: Only tries fillerout (no fallbacks)
+    // Other lines: Tries fillerout → csct → bc
     const productionResult = await getProductionCountWithFallback(
-        { Tags, TagValues, Op }, 
+        { Tags, TagValues, Op, Line }, 
         line.id, 
         job.actualStartTime, 
         effectiveEndTime,
