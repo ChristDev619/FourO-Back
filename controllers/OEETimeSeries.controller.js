@@ -479,7 +479,31 @@ async function getMachineStateSequences(machineId, startTime, endTime) {
     if (productionCounterType === 'fillerout') {
       // FILLER_OUTPUT: Use directly (already in bottles from filler)
       totalNetProduction = lastTagValueNumber - batchStartValue;
-      totalCaseCount = 0; // Not applicable for direct bottle counting
+      
+      // ALSO fetch packer case count (csct) for visibility and to align with report
+      const caseCountTag = await Tags.findOne({
+        where: { taggableType: "line", taggableId: lineId, ref: TagRefs.CASE_COUNT }
+      });
+      
+      if (caseCountTag) {
+        const caseTagValues = await TagValues.findAll({
+          where: {
+            tagId: caseCountTag.id,
+            createdAt: {
+              [Op.gte]: jobStart.startOf('minute').toDate(),
+              [Op.lte]: jobEnd.endOf('minute').toDate()
+            }
+          },
+          order: [['createdAt', 'ASC']]
+        });
+        
+        if (caseTagValues.length > 0) {
+          const caseFirstValue = parseInt(caseTagValues[0].value);
+          const caseLastValue = parseInt(caseTagValues[caseTagValues.length - 1].value);
+          totalCaseCount = caseLastValue - caseFirstValue;
+          console.log(`  [OEE CURVE] Packer Cases (csct): ${totalCaseCount} cases (palletizer input / packer output)`);
+        }
+      }
       
       if (totalNetProduction < 0) {
         console.error(`❌ ERROR: Negative filler output count difference! Counter reset detected.`);

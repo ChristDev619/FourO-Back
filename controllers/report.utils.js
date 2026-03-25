@@ -213,9 +213,47 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op, Line }, lin
                 console.log(`  Last Value: ${lastValue.value} (at ${lastValue.createdAt})`);
                 console.log(`  Bottle Count: ${bottleCount}`);
                 
+                // ALSO fetch packer case count (csct) for visibility
+                let packerCasesCount = 0;
+                const caseCountTag = await Tags.findOne({
+                    where: {
+                        taggableId: lineId,
+                        taggableType: 'line',
+                        ref: TagRefs.CASE_COUNT
+                    }
+                });
+                
+                if (caseCountTag) {
+                    const caseFirstValue = await TagValues.findOne({
+                        where: { tagId: caseCountTag.id, createdAt: { [Op.gte]: actualStartTime } },
+                        order: [['createdAt', 'ASC']]
+                    });
+                    
+                    let caseLastValue;
+                    if (isLive) {
+                        caseLastValue = await TagValues.findOne({
+                            where: { 
+                                tagId: caseCountTag.id,
+                                createdAt: { [Op.gte]: actualStartTime }
+                            },
+                            order: [['createdAt', 'DESC']]
+                        });
+                    } else {
+                        caseLastValue = await TagValues.findOne({
+                            where: { tagId: caseCountTag.id, createdAt: { [Op.lte]: actualEndTime } },
+                            order: [['createdAt', 'DESC']]
+                        });
+                    }
+                    
+                    if (caseFirstValue && caseLastValue) {
+                        packerCasesCount = parseFloat(caseLastValue.value) - parseFloat(caseFirstValue.value);
+                        console.log(`  Packer Cases (csct): ${packerCasesCount} cases (palletizer input / packer output)`);
+                    }
+                }
+                
                 return {
                     bottleCount,
-                    casesCount: 0, // Not applicable for direct bottle counting
+                    casesCount: packerCasesCount,
                     method: 'fillerout',
                     source: 'FILLER_OUTPUT',
                     multiplier: 1
