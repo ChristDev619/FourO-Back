@@ -121,7 +121,8 @@ async function fetchProductCountUntil(lineId, jobId) {
         if (!tag) throw new Error("Bottle Count (bc) tag not found");
 
         const jobStart = dayjs(job.actualStartTime);
-        const endTime = dayjs(job.actualEndTime);
+        // For live/running jobs, actualEndTime is NULL — use current time as the upper bound
+        const endTime = job.actualEndTime ? dayjs(job.actualEndTime) : dayjs();
 
         const [valueAtStart, valueAtEnd] = await Promise.all([
             TagValues.findOne({
@@ -640,6 +641,7 @@ module.exports = {
     calculateSLT,
     calculateUDT,
     calculateVOT,
+    calculateVOTProgram,
     getTimeTypeDuration,
     calculateTrueEfficiency,
 };

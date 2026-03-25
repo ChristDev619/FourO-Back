@@ -474,8 +474,8 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     // For historical reports, keep existing behavior (use program dates)
     const programForTags = isLiveMode ? null : program;
     
-    const fillerCount = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.BOTTLES_COUNT, job.actualStartTime, effectiveEndTime, programForTags, isLiveMode);
-    console.log(`[REPORT] Filler Count (bc): ${fillerCount}`);
+    const fillerCount = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.BLOWERINPUT, job.actualStartTime, effectiveEndTime, programForTags, isLiveMode);
+    console.log(`[REPORT] In Feed Counter (bc1): ${fillerCount}`);
     
     const fillerCountAqua = await getTagValuesDifference({ Tags, TagValues, Op }, line.id, TagRefs.BLOWERINPUT, job.actualStartTime, effectiveEndTime, programForTags, isLiveMode);
 
