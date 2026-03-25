@@ -111,9 +111,114 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
         }
         
         console.log(`[LIVE ALARMS] Found ${tagValues.length} tag value records to process`);
+
+        // Cache OutputTotal tags by machine for faster live qualification checks
+        const outputTagCache = new Map();
+
+        // Historical parity: only qualify alarm intervals where OutputTotal increased
+        const checkOutputTotalDuringAlarmLive = async (machineId, lineId, alarmStartTime, alarmEndTime) => {
+            try {
+                let outputTag = outputTagCache.get(machineId);
+
+                if (outputTag === undefined) {
+                    // 1) Prefer machine-level OutputTotal
+                    outputTag = await Tags.findOne({
+                        where: {
+                            taggableType: 'machine',
+                            taggableId: machineId,
+                            name: { [Op.like]: '%_OutputTotal' }
+                        },
+                        raw: true
+                    });
+
+                    // 2) Fallback to line-level OutputTotal for this machine name
+                    if (!outputTag) {
+                        const machine = await Machine.findOne({
+                            where: { id: machineId },
+                            attributes: ['id', 'name'],
+                            raw: true
+                        });
+
+                        if (machine?.name) {
+                            outputTag = await Tags.findOne({
+                                where: {
+                                    taggableType: 'line',
+                                    taggableId: lineId,
+                                    name: { [Op.like]: `%${machine.name}%OutputTotal` }
+                                },
+                                raw: true
+                            });
+                        }
+                    }
+
+                    // Cache null when not found to avoid repeated lookups
+                    outputTagCache.set(machineId, outputTag || null);
+                }
+
+                if (!outputTag) {
+                    return {
+                        increased: false,
+                        firstValue: null,
+                        lastValue: null,
+                        outputTagId: null,
+                        reason: "no_output_tag"
+                    };
+                }
+
+                // IMPORTANT: Use raw DB timestamps for qualification parity with historical
+                const firstValueRecord = await TagValues.findOne({
+                    where: {
+                        tagId: outputTag.id,
+                        createdAt: { [Op.lte]: alarmStartTime }
+                    },
+                    order: [['createdAt', 'DESC']],
+                    raw: true
+                });
+
+                const lastValueRecord = await TagValues.findOne({
+                    where: {
+                        tagId: outputTag.id,
+                        createdAt: { [Op.lte]: alarmEndTime }
+                    },
+                    order: [['createdAt', 'DESC']],
+                    raw: true
+                });
+
+                if (!firstValueRecord || !lastValueRecord) {
+                    return {
+                        increased: false,
+                        firstValue: null,
+                        lastValue: null,
+                        outputTagId: outputTag.id,
+                        reason: "missing_output_values"
+                    };
+                }
+
+                const firstValue = parseFloat(firstValueRecord.value);
+                const lastValue = parseFloat(lastValueRecord.value);
+                const increased = Number.isFinite(firstValue) && Number.isFinite(lastValue) && lastValue > firstValue;
+                return {
+                    increased,
+                    firstValue,
+                    lastValue,
+                    outputTagId: outputTag.id,
+                    reason: increased ? "qualified" : "output_not_increased"
+                };
+            } catch (error) {
+                console.error(`[LIVE ALARMS] OutputTotal qualification failed for machine ${machineId}:`, error);
+                return {
+                    increased: false,
+                    firstValue: null,
+                    lastValue: null,
+                    outputTagId: null,
+                    reason: "qualification_error"
+                };
+            }
+        };
         
         // Step 3: Process tag values to identify alarm sequences
         const alarms = [];
+        const machineQualifiedOnce = new Map(); // machineId -> true after first positive OutputTotal interval
         const tagMap = new Map();
         alarmTags.forEach(tag => tagMap.set(tag.id, tag));
         
@@ -136,25 +241,52 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
             for (let i = 0; i < values.length; i++) {
                 const currentValue = values[i];
                 const alarmCode = currentValue.value;
+                const currentValueTimeForDuration =
+                    liveInstantFromDbDate(currentValue.createdAt) || dayjs(currentValue.createdAt);
                 // Skip if value is "0" or empty (no alarm)
                 if (!alarmCode || alarmCode === '0' || alarmCode === 0) {
                     // If we were tracking an alarm, close it
                     if (currentAlarm !== null && alarmStartTime !== null) {
                         const alarmEndTime = currentValue.createdAt;
-                        const durationMinutes = dayjs(alarmEndTime).diff(dayjs(alarmStartTime), 'minute', true);
+                        const alarmStartTimeForDuration =
+                            liveInstantFromDbDate(alarmStartTime) || dayjs(alarmStartTime);
+                        const durationMinutes = currentValueTimeForDuration.diff(alarmStartTimeForDuration, 'minute', true);
                         
                         // Only include alarms >= 5 minutes
                         if (durationMinutes >= 5) {
-                            alarms.push({
-                                tagId: tagId,
-                                machineId: tag.taggableId,
-                                alarmCode: currentAlarm,
-                                alarmStartDateTime: alarmStartTime,
-                                alarmEndDateTime: alarmEndTime,
-                                duration: durationMinutes,
-                                alarmReasonName: null,
-                                alarmNote: null
-                            });
+                            const alreadyQualified = machineQualifiedOnce.get(tag.taggableId) === true;
+                            let allowAlarm = alreadyQualified;
+                            let outputCheck = null;
+                            if (!alreadyQualified) {
+                                outputCheck = await checkOutputTotalDuringAlarmLive(
+                                    tag.taggableId,
+                                    job.lineId,
+                                    alarmStartTime,
+                                    alarmEndTime
+                                );
+                                if (outputCheck.increased) {
+                                    machineQualifiedOnce.set(tag.taggableId, true);
+                                    allowAlarm = true;
+                                }
+                            }
+                            if (allowAlarm) {
+                                const qMode = alreadyQualified ? "carry_forward" : "first_positive_interval";
+                                console.log(`[LIVE ALARMS][QUALIFIED] machine=${tag.taggableId} tag=${tagId} code=${currentAlarm} start=${alarmStartTime} end=${alarmEndTime} duration=${durationMinutes.toFixed(2)} mode=${qMode}`);
+                                alarms.push({
+                                    tagId: tagId,
+                                    machineId: tag.taggableId,
+                                    alarmCode: currentAlarm,
+                                    alarmStartDateTime: alarmStartTime,
+                                    alarmEndDateTime: alarmEndTime,
+                                    duration: durationMinutes,
+                                    alarmReasonName: null,
+                                    alarmNote: null
+                                });
+                            } else {
+                                console.log(`[LIVE ALARMS][SKIPPED] machine=${tag.taggableId} tag=${tagId} code=${currentAlarm} start=${alarmStartTime} end=${alarmEndTime} duration=${durationMinutes.toFixed(2)} reason=${outputCheck?.reason || "not_qualified_yet"} outputTag=${outputCheck?.outputTagId ?? null} outputStart=${outputCheck?.firstValue ?? null} outputEnd=${outputCheck?.lastValue ?? null}`);
+                            }
+                        } else {
+                            console.log(`[LIVE ALARMS][SKIPPED] machine=${tag.taggableId} tag=${tagId} code=${currentAlarm} start=${alarmStartTime} end=${alarmEndTime} duration=${durationMinutes.toFixed(2)} reason=duration_below_5`);
                         }
                         
                         currentAlarm = null;
@@ -166,19 +298,44 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
                 // If alarm code changed, close previous and start new
                 if (currentAlarm !== null && currentAlarm !== alarmCode) {
                     const alarmEndTime = currentValue.createdAt;
-                    const durationMinutes = dayjs(alarmEndTime).diff(dayjs(alarmStartTime), 'minute', true);
+                    const alarmStartTimeForDuration =
+                        liveInstantFromDbDate(alarmStartTime) || dayjs(alarmStartTime);
+                    const durationMinutes = currentValueTimeForDuration.diff(alarmStartTimeForDuration, 'minute', true);
                     
                     if (durationMinutes >= 5) {
-                        alarms.push({
-                            tagId: tagId,
-                            machineId: tag.taggableId,
-                            alarmCode: currentAlarm,
-                            alarmStartDateTime: alarmStartTime,
-                            alarmEndDateTime: alarmEndTime,
-                            duration: durationMinutes,
-                            alarmReasonName: null,
-                            alarmNote: null
-                        });
+                        const alreadyQualified = machineQualifiedOnce.get(tag.taggableId) === true;
+                        let allowAlarm = alreadyQualified;
+                        let outputCheck = null;
+                        if (!alreadyQualified) {
+                            outputCheck = await checkOutputTotalDuringAlarmLive(
+                                tag.taggableId,
+                                job.lineId,
+                                alarmStartTime,
+                                alarmEndTime
+                            );
+                            if (outputCheck.increased) {
+                                machineQualifiedOnce.set(tag.taggableId, true);
+                                allowAlarm = true;
+                            }
+                        }
+                        if (allowAlarm) {
+                            const qMode = alreadyQualified ? "carry_forward" : "first_positive_interval";
+                            console.log(`[LIVE ALARMS][QUALIFIED] machine=${tag.taggableId} tag=${tagId} code=${currentAlarm} start=${alarmStartTime} end=${alarmEndTime} duration=${durationMinutes.toFixed(2)} mode=${qMode}`);
+                            alarms.push({
+                                tagId: tagId,
+                                machineId: tag.taggableId,
+                                alarmCode: currentAlarm,
+                                alarmStartDateTime: alarmStartTime,
+                                alarmEndDateTime: alarmEndTime,
+                                duration: durationMinutes,
+                                alarmReasonName: null,
+                                alarmNote: null
+                            });
+                        } else {
+                            console.log(`[LIVE ALARMS][SKIPPED] machine=${tag.taggableId} tag=${tagId} code=${currentAlarm} start=${alarmStartTime} end=${alarmEndTime} duration=${durationMinutes.toFixed(2)} reason=${outputCheck?.reason || "not_qualified_yet"} outputTag=${outputCheck?.outputTagId ?? null} outputStart=${outputCheck?.firstValue ?? null} outputEnd=${outputCheck?.lastValue ?? null}`);
+                        }
+                    } else {
+                        console.log(`[LIVE ALARMS][SKIPPED] machine=${tag.taggableId} tag=${tagId} code=${currentAlarm} start=${alarmStartTime} end=${alarmEndTime} duration=${durationMinutes.toFixed(2)} reason=duration_below_5`);
                     }
                 }
                 
@@ -193,21 +350,46 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
             if (currentAlarm !== null && alarmStartTime !== null) {
                 const lastValue = values[values.length - 1];
                 const alarmEndTime = new Date(); // Use NOW() for ongoing alarms
-                const durationMinutes = dayjs(alarmEndTime).diff(dayjs(alarmStartTime), 'minute', true);
+                const alarmStartTimeForDuration =
+                    liveInstantFromDbDate(alarmStartTime) || dayjs(alarmStartTime);
+                const durationMinutes = dayjs(alarmEndTime).diff(alarmStartTimeForDuration, 'minute', true);
                 
                 if (durationMinutes >= 5) {
-                    alarms.push({
-                        tagId: tagId,
-                        machineId: tag.taggableId,
-                        alarmCode: currentAlarm,
-                        alarmStartDateTime: alarmStartTime,
-                        alarmEndDateTime: alarmEndTime,
-                        duration: durationMinutes,
-                        alarmReasonName: null,
-                        alarmNote: null,
-                        endFromNow: true
-                    });
-                    console.log(`[LIVE ALARMS] ⚠️  ONGOING alarm detected: ${currentAlarm} (duration: ${durationMinutes.toFixed(2)} min)`);
+                    const alreadyQualified = machineQualifiedOnce.get(tag.taggableId) === true;
+                    let allowAlarm = alreadyQualified;
+                    let outputCheck = null;
+                    if (!alreadyQualified) {
+                        outputCheck = await checkOutputTotalDuringAlarmLive(
+                            tag.taggableId,
+                            job.lineId,
+                            alarmStartTime,
+                            alarmEndTime
+                        );
+                        if (outputCheck.increased) {
+                            machineQualifiedOnce.set(tag.taggableId, true);
+                            allowAlarm = true;
+                        }
+                    }
+                    if (allowAlarm) {
+                        const qMode = alreadyQualified ? "carry_forward" : "first_positive_interval";
+                        console.log(`[LIVE ALARMS][QUALIFIED][ONGOING] machine=${tag.taggableId} tag=${tagId} code=${currentAlarm} start=${alarmStartTime} end=${alarmEndTime.toISOString()} duration=${durationMinutes.toFixed(2)} mode=${qMode}`);
+                        alarms.push({
+                            tagId: tagId,
+                            machineId: tag.taggableId,
+                            alarmCode: currentAlarm,
+                            alarmStartDateTime: alarmStartTime,
+                            alarmEndDateTime: alarmEndTime,
+                            duration: durationMinutes,
+                            alarmReasonName: null,
+                            alarmNote: null,
+                            endFromNow: true
+                        });
+                        console.log(`[LIVE ALARMS] ⚠️  ONGOING alarm detected: ${currentAlarm} (duration: ${durationMinutes.toFixed(2)} min)`);
+                    } else {
+                        console.log(`[LIVE ALARMS][SKIPPED][ONGOING] machine=${tag.taggableId} tag=${tagId} code=${currentAlarm} start=${alarmStartTime} end=${alarmEndTime.toISOString()} duration=${durationMinutes.toFixed(2)} reason=${outputCheck?.reason || "not_qualified_yet"} outputTag=${outputCheck?.outputTagId ?? null} outputStart=${outputCheck?.firstValue ?? null} outputEnd=${outputCheck?.lastValue ?? null}`);
+                    }
+                } else {
+                    console.log(`[LIVE ALARMS][SKIPPED][ONGOING] machine=${tag.taggableId} tag=${tagId} code=${currentAlarm} start=${alarmStartTime} end=${alarmEndTime.toISOString()} duration=${durationMinutes.toFixed(2)} reason=duration_below_5`);
                 }
             }
         }
@@ -262,7 +444,10 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
             });
             
             if (enriched && enriched.length > 0) {
-                enrichedAlarms.push(enriched[0]);
+                enrichedAlarms.push({
+                    ...enriched[0],
+                    endFromNow: alarm.endFromNow === true
+                });
             }
         }
         
