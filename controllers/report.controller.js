@@ -136,12 +136,14 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
             for (let i = 0; i < values.length; i++) {
                 const currentValue = values[i];
                 const alarmCode = currentValue.value;
+                const currentValueTime =
+                    liveInstantFromDbDate(currentValue.createdAt)?.toDate?.() ?? currentValue.createdAt;
                 
                 // Skip if value is "0" or empty (no alarm)
                 if (!alarmCode || alarmCode === '0' || alarmCode === 0) {
                     // If we were tracking an alarm, close it
                     if (currentAlarm !== null && alarmStartTime !== null) {
-                        const alarmEndTime = currentValue.createdAt;
+                        const alarmEndTime = currentValueTime;
                         const durationMinutes = dayjs(alarmEndTime).diff(dayjs(alarmStartTime), 'minute', true);
                         
                         // Only include alarms >= 5 minutes
@@ -166,7 +168,7 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
                 
                 // If alarm code changed, close previous and start new
                 if (currentAlarm !== null && currentAlarm !== alarmCode) {
-                    const alarmEndTime = currentValue.createdAt;
+                    const alarmEndTime = currentValueTime;
                     const durationMinutes = dayjs(alarmEndTime).diff(dayjs(alarmStartTime), 'minute', true);
                     
                     if (durationMinutes >= 5) {
@@ -186,7 +188,7 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
                 // Start new alarm or continue existing
                 if (currentAlarm !== alarmCode) {
                     currentAlarm = alarmCode;
-                    alarmStartTime = currentValue.createdAt;
+                    alarmStartTime = currentValueTime;
                 }
             }
             
