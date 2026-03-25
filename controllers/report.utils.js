@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const EmailService = require("../utils/services/EmailService");
 const logger = require("../utils/logger");
+const { liveInstantFromDbDate, formatInstantInLiveTimezone } = require("../utils/liveReportTime");
 
 // Helper: Log alarm codes without descriptions to a text file
 function logMissingAlarmDescription(alarmCode, machineId, machineName) {
@@ -402,7 +403,7 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op, Line }, lin
 }
 
 // Helper: Format alarms data
-function formatAlarms(alarms) {
+function formatAlarms(alarms, isLiveMode = false) {
     const dayjs = require("dayjs");
     return alarms.map((alarm) => {
         let alarmDescription = "N/A";
@@ -417,14 +418,27 @@ function formatAlarms(alarms) {
                 alarm.machineName || alarm.machine_name || 'Unknown'
             );
         }
+        const startDateTime = isLiveMode
+            ? (liveInstantFromDbDate(alarm.alarmStartDateTime)?.format("YYYY-MM-DD HH:mm:ss")
+                || dayjs(alarm.alarmStartDateTime).format("YYYY-MM-DD HH:mm:ss"))
+            : dayjs(alarm.alarmStartDateTime).format("YYYY-MM-DD HH:mm:ss");
+
+        const endDateTime = isLiveMode
+            ? (alarm.endFromNow
+                ? (formatInstantInLiveTimezone(alarm.alarmEndDateTime)
+                    || dayjs(alarm.alarmEndDateTime).format("YYYY-MM-DD HH:mm:ss"))
+                : (liveInstantFromDbDate(alarm.alarmEndDateTime)?.format("YYYY-MM-DD HH:mm:ss")
+                    || dayjs(alarm.alarmEndDateTime).format("YYYY-MM-DD HH:mm:ss")))
+            : dayjs(alarm.alarmEndDateTime).format("YYYY-MM-DD HH:mm:ss");
+
         return {
             id: alarm.id,
             machineId: alarm.machineId,
             machineName: alarm.machineName || alarm.machine_name || 'Unknown',
             alarmCode: alarm.alarmCode,
             alarmDescription: alarmDescription,
-            startDateTime: dayjs(alarm.alarmStartDateTime).format("YYYY-MM-DD HH:mm:ss"),
-            endDateTime: dayjs(alarm.alarmEndDateTime).format("YYYY-MM-DD HH:mm:ss"),
+            startDateTime,
+            endDateTime,
             duration: parseFloat(alarm.duration || 0).toFixed(2),
             reason: alarm.alarmReasonName || null,
             note: alarm.alarmNote || null,

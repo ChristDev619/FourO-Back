@@ -21,7 +21,20 @@ function liveInstantFromDbDate(dbDate) {
     return z.isValid() ? z : null;
 }
 
+/**
+ * Format a real instant (Date) in the fixed live report timezone.
+ *
+ * @param {Date|string|null|undefined} instant
+ * @returns {string|null}
+ */
+function formatInstantInLiveTimezone(instant) {
+    if (!instant) return null;
+    const z = dayjs(instant).tz(LIVE_REPORT_WALL_TIMEZONE);
+    return z.isValid() ? z.format("YYYY-MM-DD HH:mm:ss") : null;
+}
+
 module.exports = {
     LIVE_REPORT_WALL_TIMEZONE,
     liveInstantFromDbDate,
+    formatInstantInLiveTimezone,
 };

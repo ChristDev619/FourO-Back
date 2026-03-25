@@ -196,7 +196,61 @@ app.get("/api/health", (req, res) => {
 
 const httpServer = app.listen(port, '0.0.0.0', () => {
     console.log(`Server is running on port ${port}`);
+    
+    // Send deployment success notification email
+    sendDeploymentNotification();
 });
+
+// Deployment notification function
+async function sendDeploymentNotification() {
+  try {
+    const EmailService = require('./utils/services/EmailService');
+    const emailService = new EmailService();
+    
+    if (!emailService.isReady()) {
+      console.log('📧 Email service not configured, skipping deployment notification');
+      return;
+    }
+    
+    const recipients = [
+      'christian_chindy@hotmail.com'
+    ];
+    
+    const deploymentData = {
+      apiUrl: 'http://aquafina-backend-api.uaenorth.azurecontainer.io:8011',
+      deploymentTime: new Date().toLocaleString('en-US', { 
+        timeZone: 'Asia/Dubai',
+        dateStyle: 'full',
+        timeStyle: 'long'
+      })
+    };
+    
+    // Load template and replace placeholders
+    const template = await emailService.loadTemplate('deployment-success');
+    const htmlContent = emailService.replacePlaceholders(template, deploymentData);
+    
+    // Send to both recipients
+    for (const recipient of recipients) {
+      await emailService.sendEmail({
+        to: recipient,
+        subject: '🚀 AquaFina Backend Deployment Successful - System Live',
+        htmlContent: htmlContent,
+        metadata: { 
+          type: 'deployment-notification',
+          timestamp: new Date().toISOString()
+        }
+      });
+      console.log(`✅ Deployment notification sent to ${recipient}`);
+    }
+    
+    console.log('🎉 All deployment notifications sent successfully');
+    
+  } catch (error) {
+    console.error('❌ Failed to send deployment notification email:', error.message);
+    console.error('Stack:', error.stack);
+  }
+}
+
 // Start feed inactivity monitor (1-minute checker)
 try {
   const { getFeedInactivityMonitor } = require('./utils/services/FeedInactivityMonitor');
