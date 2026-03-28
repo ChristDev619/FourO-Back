@@ -632,6 +632,81 @@ function mergeOverlappingBreakdowns(alarms) {
 }
 
 /**
+ * Turn mergeOverlappingBreakdowns() output into API rows for the Breakdowns table.
+ * Duration is the union window (end − start), not the sum of contributing alarms.
+ */
+function formatMergedBreakdownsForReport(mergedBreakdowns, options = {}) {
+    const dayjs = require("dayjs");
+    const { jobId = null, jobName = null } = options;
+
+    if (!mergedBreakdowns || mergedBreakdowns.length === 0) {
+        return [];
+    }
+
+    return mergedBreakdowns.map((b, idx) => {
+        const start = dayjs(b.startDateTime);
+        const end = dayjs(b.endDateTime);
+        const durationMinutes = start.isValid() && end.isValid()
+            ? end.diff(start, "minute", true)
+            : 0;
+
+        const machineNamesList = b.machineNames || [];
+        const uniqueMachineNames = [...new Set(machineNamesList)];
+        const machinesArr = b.machines || [];
+
+        const contributing = b.alarms || [];
+        const descs = [
+            ...new Set(
+                contributing
+                    .map((a) => a.alarmDescription)
+                    .filter((d) => d && d !== "N/A")
+            ),
+        ];
+        let alarmDescription = "N/A";
+        if (descs.length === 1) {
+            alarmDescription = descs[0];
+        } else if (descs.length > 1) {
+            alarmDescription = descs.join(" · ");
+        }
+
+        const firstReason = contributing.map((a) => a.reason).find((r) => r != null && r !== "");
+        const firstNote = contributing.map((a) => a.note).find((n) => n != null && n !== "");
+
+        const row = {
+            id: `merged_${jobId != null ? jobId : "single"}_${start.valueOf()}_${end.valueOf()}_${idx}`,
+            machineIds: [...new Set(machinesArr.filter(Boolean))],
+            machineName: uniqueMachineNames.join(", ") || "Unknown",
+            alarmDescription,
+            startDateTime: start.format("YYYY-MM-DD HH:mm:ss"),
+            endDateTime: end.format("YYYY-MM-DD HH:mm:ss"),
+            duration: parseFloat((Number.isFinite(durationMinutes) ? durationMinutes : 0).toFixed(2)),
+            reason: firstReason ?? null,
+            note: firstNote ?? null,
+            contributingCount: contributing.length,
+            contributingAlarms: contributing.map((a) => ({
+                id: a.id,
+                machineId: a.machineId,
+                machineName: a.machineName,
+                alarmCode: a.alarmCode,
+                alarmDescription: a.alarmDescription,
+                startDateTime: a.startDateTime,
+                endDateTime: a.endDateTime,
+                duration: a.duration,
+                reason: a.reason,
+                note: a.note,
+            })),
+        };
+
+        if (jobId != null) {
+            row.jobId = jobId;
+            row.jobName = jobName;
+        }
+
+        return row;
+    });
+}
+
+/**
  * Calculate total KWH consumption from receiver meters connected to line's location
  * @param {Object} deps - Dependencies { Tags, TagValues, Op, Meters, Unit, sequelize, QueryTypes, Line }
  * @param {number} lineId - Line ID to get location from
@@ -1560,6 +1635,7 @@ module.exports = {
     prepareWaterfallData,
     getMechanicalDowntime,
     mergeOverlappingBreakdowns,
+    formatMergedBreakdownsForReport,
     calculateEmsMetrics,
     calculateTotalKwhConsumption,
     getPricePerLiterAtJobStart,

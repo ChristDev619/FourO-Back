@@ -38,6 +38,7 @@ const {
     prepareWaterfallData,
     getMechanicalDowntime,
     mergeOverlappingBreakdowns,
+    formatMergedBreakdownsForReport,
     calculateEmsMetrics,
     calculateManHourMetrics,
 } = require("./report.utils.js");
@@ -1311,6 +1312,7 @@ module.exports = {
                 // Aggregate all jobs
                 let totalFillerCount = 0, totalNetProduction = 0, totalBottlesLost = 0, totalCasesCount = 0, totalPalletsCount = 0;
                 let allAlarms = [];
+                let allMergedBreakdownRows = [];
                 let allMetrics = [];
                 let allParetoStates = [];
                 let allWaterfall = [];
@@ -1341,6 +1343,13 @@ module.exports = {
                     totalCasesCount += jobData.casesCount;
                     totalPalletsCount += jobData.palletsCount;
                     allAlarms.push(...jobData.formattedAlarms);
+                    const jobMergedRaw = mergeOverlappingBreakdowns(jobData.formattedAlarms);
+                    allMergedBreakdownRows.push(
+                        ...formatMergedBreakdownsForReport(jobMergedRaw, {
+                            jobId: job.id,
+                            jobName: job.jobName,
+                        })
+                    );
                     allMetrics.push(jobData.metrics);
                     totalDuration += jobData.duration;
                     allStatesResults.push(...(jobData.statesResults || []));
@@ -1384,6 +1393,11 @@ module.exports = {
                         aggWaterfall.values.push(sum);
                     }
                 }
+
+                allMergedBreakdownRows.sort(
+                    (a, b) =>
+                        new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime()
+                );
 
                 // KPIs - Merge overlapping breakdowns to avoid double counting for calculations
                 const mergedBreakdowns = mergeOverlappingBreakdowns(allAlarms);
@@ -1559,6 +1573,7 @@ module.exports = {
                     paretoData: [paretoData],
                     waterfallData: aggWaterfall,
                     alarms: allAlarms,
+                    mergedBreakdowns: allMergedBreakdownRows,
                     line: line,
                     jobs: jobs,
                     machines: line.machines,
@@ -1605,9 +1620,9 @@ module.exports = {
             }
 
             // KPIs - Merge overlapping breakdowns to avoid double counting for calculations
-            const mergedBreakdowns = mergeOverlappingBreakdowns(jobData.formattedAlarms);
-            const numberOfBreakdowns = mergedBreakdowns.length;
-            const totalDowntime = mergedBreakdowns.reduce((total, breakdown) => {
+            const mergedBreakdownsRaw = mergeOverlappingBreakdowns(jobData.formattedAlarms);
+            const numberOfBreakdowns = mergedBreakdownsRaw.length;
+            const totalDowntime = mergedBreakdownsRaw.reduce((total, breakdown) => {
                 const breakdownDuration = dayjs(breakdown.endDateTime).diff(dayjs(breakdown.startDateTime), 'minute');
                 return total + breakdownDuration;
             }, 0);
@@ -1621,6 +1636,10 @@ module.exports = {
             const performance = jobData.metrics.not && jobData.metrics.got ? (jobData.metrics.not / jobData.metrics.got) * 100 : 0;
             const oee = (jobData.metrics.vot / jobData.duration) * 100;
             const recipe = jobData.recipe;
+            const mergedBreakdowns = formatMergedBreakdownsForReport(mergedBreakdownsRaw, {
+                jobId: job.id,
+                jobName: job.jobName,
+            });
 
             res.status(200).json({
                 reportName: report.name,
@@ -1658,6 +1677,7 @@ module.exports = {
                 paretoData: [jobData.paretoData],
                 waterfallData: jobData.waterfallData,
                 alarms: jobData.formattedAlarms,
+                mergedBreakdowns,
                 line: line,
                 job: job,
                 machines: line.machines,
@@ -1808,9 +1828,9 @@ module.exports = {
             }
 
             // KPIs - Merge overlapping breakdowns to avoid double counting
-            const mergedBreakdowns = mergeOverlappingBreakdowns(jobData.formattedAlarms);
-            const numberOfBreakdowns = mergedBreakdowns.length;
-            const totalDowntime = mergedBreakdowns.reduce((total, breakdown) => {
+            const mergedBreakdownsRaw = mergeOverlappingBreakdowns(jobData.formattedAlarms);
+            const numberOfBreakdowns = mergedBreakdownsRaw.length;
+            const totalDowntime = mergedBreakdownsRaw.reduce((total, breakdown) => {
                 const breakdownDuration = dayjs(breakdown.endDateTime).diff(dayjs(breakdown.startDateTime), 'minute');
                 return total + breakdownDuration;
             }, 0);
@@ -1824,6 +1844,10 @@ module.exports = {
             const performance = jobData.metrics.not && jobData.metrics.got ? (jobData.metrics.not / jobData.metrics.got) * 100 : 0;
             const oee = jobData.duration > 0 ? (jobData.metrics.vot / jobData.duration) * 100 : 0;
             const recipe = jobData.recipe;
+            const mergedBreakdowns = formatMergedBreakdownsForReport(mergedBreakdownsRaw, {
+                jobId: job.id,
+                jobName: job.jobName,
+            });
 
             // Build response (same structure as regular report endpoint)
             const response = {
@@ -1864,6 +1888,7 @@ module.exports = {
                 paretoData: [jobData.paretoData],
                 waterfallData: jobData.waterfallData,
                 alarms: jobData.formattedAlarms,
+                mergedBreakdowns,
                 line: line,
                 job: {
                     ...job.toJSON(),
