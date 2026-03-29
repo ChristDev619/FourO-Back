@@ -436,11 +436,11 @@ async function enrichAlarmsWithQualification(alarms, job, db, Op, sequelize) {
             continue;
         }
         
-        // Step 2: Get baseline value (first value at or BEFORE job start)
+        // Step 2: Get baseline value (first value STRICTLY BEFORE job start)
         const baselineRecord = await db.TagValues.findOne({
             where: {
                 tagId: outputTag.id,
-                createdAt: { [Op.lte]: job.actualStartTime }
+                createdAt: { [Op.lt]: job.actualStartTime }
             },
             order: [['createdAt', 'DESC']],
             attributes: ['value', 'createdAt']

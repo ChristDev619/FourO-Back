@@ -75,11 +75,11 @@ async function checkMachineQualification(machineId, job, transaction) {
         // OutputTotal counters are cumulative and never reset to 0, so we need to compare start vs end values
         console.log(`     🔎 Checking if OutputTotal increased during the job...`);
         
-        // Get value at or BEFORE job start (baseline)
+        // Get value STRICTLY BEFORE job start (baseline)
         const firstValueRecord = await db.TagValues.findOne({
             where: {
                 tagId: outputTag.id,
-                createdAt: { [Op.lte]: job.actualStartTime }
+                createdAt: { [Op.lt]: job.actualStartTime }
             },
             order: [['createdAt', 'DESC']],
             transaction
