@@ -392,49 +392,8 @@ async function processSpecialTagOperation(tag, value, operationTime, utcNow, tra
                 const lineName = line?.name || `Line_${lineId}`;
                 const jobName = `${lineName}.Run_${utcNow}`;
 
-                // Fetch SKU from recipe tag BEFORE creating the job
-                let skuId = null;
-                const recipeTag = await Tags.findOne({
-                    where: {
-                        ref: TagRefs.RECIPE,
-                        taggableType: 'line',
-                        taggableId: lineId
-                    },
-                    transaction
-                });
-
-                if (recipeTag) {
-                    const latestRecipeTagVal = await TagValues.findOne({
-                        where: {
-                            tagId: recipeTag.id,
-                            createdAt: { [Op.lte]: operationTime }
-                        },
-                        order: [['createdAt', 'DESC']],
-                        transaction
-                    });
-
-                    if (latestRecipeTagVal) {
-                        const recipeNumber = parseInt(latestRecipeTagVal.value);
-                        const recipe = await sequelize.query(
-                            `SELECT r.id, r.skuId 
-                             FROM recipes r
-                             JOIN linerecipies lr ON r.id = lr.recipieId  
-                             WHERE r.number = :recipeNumber 
-                             AND lr.lineId = :lineId 
-                             LIMIT 1`,
-                            {
-                                replacements: { recipeNumber, lineId },
-                                type: sequelize.QueryTypes.SELECT,
-                                transaction
-                            }
-                        );
-
-                        if (recipe.length > 0 && recipe[0].skuId) {
-                            skuId = recipe[0].skuId;
-                            console.log(`📦 Found SKU ${skuId} from recipe ${recipeNumber} for new job`);
-                        }
-                    }
-                }
+                // Resolve SKU from recipe tag BEFORE creating the job
+                const skuId = await resolveSkuForLine(lineId, operationTime, transaction);
 
                 const newJob = await Job.create({
                     jobName,
@@ -442,7 +401,7 @@ async function processSpecialTagOperation(tag, value, operationTime, utcNow, tra
                     actualEndTime: null,
                     lineId,
                     programId: activeProgram.id,
-                    skuId: skuId
+                    skuId
                 }, { transaction });
 
                 console.log(`✅ Created new job ${newJob.id} for line ${lineId} under program ${activeProgram.id}${skuId ? ` with SKU ${skuId}` : ' (no SKU found)'}`);
@@ -549,58 +508,79 @@ async function processSpecialTagOperation(tag, value, operationTime, utcNow, tra
 }
 
 /**
- * Handle recipe assignment for completed jobs
+ * Resolve SKU ID from recipe tag for a given line
+ * Core reusable function for SKU resolution
+ * 
+ * @param {Number} lineId - Line ID
+ * @param {String} operationTime - Operation timestamp
+ * @param {Object} transaction - Sequelize transaction
+ * @returns {Number|null} SKU ID or null if not found
  */
-async function handleRecipeAssignment(job, operationTime, transaction) {
+async function resolveSkuForLine(lineId, operationTime, transaction) {
     try {
-        // SKU will be determined from RECIPE tag (same logic as createTagValue)
-
-        // Otherwise, fall back to the recipe-based SKU assignment
         const recipeTag = await Tags.findOne({
             where: {
                 ref: TagRefs.RECIPE,
                 taggableType: 'line',
-                taggableId: job.lineId
+                taggableId: lineId
             },
             transaction
         });
 
-        if (recipeTag) {
-            const latestRecipeTagVal = await TagValues.findOne({
-                where: {
-                    tagId: recipeTag.id,
-                    createdAt: { [Op.lte]: operationTime }
-                },
-                order: [['createdAt', 'DESC']],
+        if (!recipeTag) return null;
+
+        const latestRecipeTagVal = await TagValues.findOne({
+            where: {
+                tagId: recipeTag.id,
+                createdAt: { [Op.lte]: operationTime }
+            },
+            order: [['createdAt', 'DESC']],
+            transaction
+        });
+
+        if (!latestRecipeTagVal) return null;
+
+        const recipeNumber = parseInt(latestRecipeTagVal.value);
+        const recipe = await sequelize.query(
+            `SELECT r.id, r.skuId 
+             FROM recipes r
+             JOIN linerecipies lr ON r.id = lr.recipieId  
+             WHERE r.number = :recipeNumber 
+             AND lr.lineId = :lineId 
+             LIMIT 1`,
+            {
+                replacements: { recipeNumber, lineId },
+                type: sequelize.QueryTypes.SELECT,
                 transaction
-            });
-
-            if (latestRecipeTagVal) {
-                const recipeNumber = parseInt(latestRecipeTagVal.value);
-
-                const recipe = await sequelize.query(
-                    `SELECT r.id, r.skuId 
-                     FROM recipes r
-                     JOIN linerecipies lr ON r.id = lr.recipieId  
-                     WHERE r.number = :recipeNumber 
-                     AND lr.lineId = :lineId 
-                     LIMIT 1`,
-                    {
-                        replacements: { recipeNumber, lineId: job.lineId },
-                        type: sequelize.QueryTypes.SELECT,
-                        transaction
-                    }
-                );
-
-                if (recipe.length > 0 && recipe[0].skuId) {
-                    await job.update({ skuId: recipe[0].skuId }, { transaction });
-                    console.log(`✅ Assigned SKU ${recipe[0].skuId} to job ${job.id} from recipe ${recipeNumber}`);
-                }
             }
+        );
+
+        if (recipe.length > 0 && recipe[0].skuId) {
+            console.log(`📦 Resolved SKU ${recipe[0].skuId} from recipe ${recipeNumber} for line ${lineId}`);
+            return recipe[0].skuId;
+        }
+
+        return null;
+    } catch (error) {
+        console.error(`⚠️ Error resolving SKU for line ${lineId}:`, error.message);
+        return null;
+    }
+}
+
+/**
+ * Handle recipe assignment for completed jobs
+ * Uses resolveSkuForLine() for DRY compliance
+ */
+async function handleRecipeAssignment(job, operationTime, transaction) {
+    try {
+        const skuId = await resolveSkuForLine(job.lineId, operationTime, transaction);
+        
+        if (skuId) {
+            await job.update({ skuId }, { transaction });
+            console.log(`✅ Assigned SKU ${skuId} to job ${job.id}`);
         }
     } catch (error) {
         console.error(`⚠️ Error handling recipe assignment for job ${job.id}:`, error.message);
-        // Don't throw here - we don't want to fail the entire operation for recipe assignment issues
     }
 }
 
@@ -954,49 +934,8 @@ async function processSpecialTagOperationBL2(tag, value, operationTime, utcNow, 
                 const lineName = line?.name || `Line_${lineId}`;
                 const jobName = `${lineName}.Run_${utcNow}`;
 
-                // Fetch SKU from recipe tag BEFORE creating the job
-                let skuId = null;
-                const recipeTag = await Tags.findOne({
-                    where: {
-                        ref: TagRefs.RECIPE,
-                        taggableType: 'line',
-                        taggableId: lineId
-                    },
-                    transaction
-                });
-
-                if (recipeTag) {
-                    const latestRecipeTagVal = await TagValues.findOne({
-                        where: {
-                            tagId: recipeTag.id,
-                            createdAt: { [Op.lte]: operationTime }
-                        },
-                        order: [['createdAt', 'DESC']],
-                        transaction
-                    });
-
-                    if (latestRecipeTagVal) {
-                        const recipeNumber = parseInt(latestRecipeTagVal.value);
-                        const recipe = await sequelize.query(
-                            `SELECT r.id, r.skuId 
-                             FROM recipes r
-                             JOIN linerecipies lr ON r.id = lr.recipieId  
-                             WHERE r.number = :recipeNumber 
-                             AND lr.lineId = :lineId 
-                             LIMIT 1`,
-                            {
-                                replacements: { recipeNumber, lineId },
-                                type: sequelize.QueryTypes.SELECT,
-                                transaction
-                            }
-                        );
-
-                        if (recipe.length > 0 && recipe[0].skuId) {
-                            skuId = recipe[0].skuId;
-                            console.log(`📦 BL2 Found SKU ${skuId} from recipe ${recipeNumber} for new job`);
-                        }
-                    }
-                }
+                // Resolve SKU from recipe tag BEFORE creating the job
+                const skuId = await resolveSkuForLine(lineId, operationTime, transaction);
 
                 const newJob = await Job.create({
                     jobName,
@@ -1004,7 +943,7 @@ async function processSpecialTagOperationBL2(tag, value, operationTime, utcNow, 
                     actualEndTime: null,
                     lineId,
                     programId: activeProgram.id,
-                    skuId: skuId
+                    skuId
                 }, { transaction });
 
                 console.log(`✅ Created new BL2 job ${newJob.id} for line ${lineId} under program ${activeProgram.id}${skuId ? ` with SKU ${skuId}` : ' (no SKU found)'}`);
@@ -1900,49 +1839,8 @@ async function processSpecialTagOperationRIM(tag, value, operationTime, utcNow, 
                 const lineName = line?.name || `Line_${lineId}`;
                 const jobName = `${lineName}.Run_${utcNow}`;
 
-                // Fetch SKU from recipe tag BEFORE creating the job
-                let skuId = null;
-                const recipeTag = await Tags.findOne({
-                    where: {
-                        ref: TagRefs.RECIPE,
-                        taggableType: 'line',
-                        taggableId: lineId
-                    },
-                    transaction
-                });
-
-                if (recipeTag) {
-                    const latestRecipeTagVal = await TagValues.findOne({
-                        where: {
-                            tagId: recipeTag.id,
-                            createdAt: { [Op.lte]: operationTime }
-                        },
-                        order: [['createdAt', 'DESC']],
-                        transaction
-                    });
-
-                    if (latestRecipeTagVal) {
-                        const recipeNumber = parseInt(latestRecipeTagVal.value);
-                        const recipe = await sequelize.query(
-                            `SELECT r.id, r.skuId 
-                             FROM recipes r
-                             JOIN linerecipies lr ON r.id = lr.recipieId  
-                             WHERE r.number = :recipeNumber 
-                             AND lr.lineId = :lineId 
-                             LIMIT 1`,
-                            {
-                                replacements: { recipeNumber, lineId },
-                                type: sequelize.QueryTypes.SELECT,
-                                transaction
-                            }
-                        );
-
-                        if (recipe.length > 0 && recipe[0].skuId) {
-                            skuId = recipe[0].skuId;
-                            console.log(`📦 RIM L1 Found SKU ${skuId} from recipe ${recipeNumber} for new job`);
-                        }
-                    }
-                }
+                // Resolve SKU from recipe tag BEFORE creating the job
+                const skuId = await resolveSkuForLine(lineId, operationTime, transaction);
 
                 const newJob = await Job.create({
                     jobName,
@@ -1950,7 +1848,7 @@ async function processSpecialTagOperationRIM(tag, value, operationTime, utcNow, 
                     actualEndTime: null,
                     lineId,
                     programId: activeProgram.id,
-                    skuId: skuId
+                    skuId
                 }, { transaction });
 
                 console.log(`✅ Created new RIM L1 job ${newJob.id} for line ${lineId} under program ${activeProgram.id}${skuId ? ` with SKU ${skuId}` : ' (no SKU found)'}`);
@@ -2092,49 +1990,8 @@ async function processSpecialTagOperationRIML2(tag, value, operationTime, utcNow
                 const lineName = line?.name || `Line_${lineId}`;
                 const jobName = `${lineName}.Run_${utcNow}`;
 
-                // Fetch SKU from recipe tag BEFORE creating the job
-                let skuId = null;
-                const recipeTag = await Tags.findOne({
-                    where: {
-                        ref: TagRefs.RECIPE,
-                        taggableType: 'line',
-                        taggableId: lineId
-                    },
-                    transaction
-                });
-
-                if (recipeTag) {
-                    const latestRecipeTagVal = await TagValues.findOne({
-                        where: {
-                            tagId: recipeTag.id,
-                            createdAt: { [Op.lte]: operationTime }
-                        },
-                        order: [['createdAt', 'DESC']],
-                        transaction
-                    });
-
-                    if (latestRecipeTagVal) {
-                        const recipeNumber = parseInt(latestRecipeTagVal.value);
-                        const recipe = await sequelize.query(
-                            `SELECT r.id, r.skuId 
-                             FROM recipes r
-                             JOIN linerecipies lr ON r.id = lr.recipieId  
-                             WHERE r.number = :recipeNumber 
-                             AND lr.lineId = :lineId 
-                             LIMIT 1`,
-                            {
-                                replacements: { recipeNumber, lineId },
-                                type: sequelize.QueryTypes.SELECT,
-                                transaction
-                            }
-                        );
-
-                        if (recipe.length > 0 && recipe[0].skuId) {
-                            skuId = recipe[0].skuId;
-                            console.log(`📦 RIM L2 Found SKU ${skuId} from recipe ${recipeNumber} for new job`);
-                        }
-                    }
-                }
+                // Resolve SKU from recipe tag BEFORE creating the job
+                const skuId = await resolveSkuForLine(lineId, operationTime, transaction);
 
                 const newJob = await Job.create({
                     jobName,
@@ -2142,7 +1999,7 @@ async function processSpecialTagOperationRIML2(tag, value, operationTime, utcNow
                     actualEndTime: null,
                     lineId,
                     programId: activeProgram.id,
-                    skuId: skuId
+                    skuId
                 }, { transaction });
 
                 console.log(`✅ Created new RIM L2 job ${newJob.id} for line ${lineId} under program ${activeProgram.id}${skuId ? ` with SKU ${skuId}` : ' (no SKU found)'}`);
@@ -2651,49 +2508,8 @@ async function processSpecialTagOperationRIML3(tag, value, operationTime, utcNow
                 const lineName = line?.name || `Line_${lineId}`;
                 const jobName = `${lineName}.Run_${utcNow}`;
 
-                // Fetch SKU from recipe tag BEFORE creating the job
-                let skuId = null;
-                const recipeTag = await Tags.findOne({
-                    where: {
-                        ref: TagRefs.RECIPE,
-                        taggableType: 'line',
-                        taggableId: lineId
-                    },
-                    transaction
-                });
-
-                if (recipeTag) {
-                    const latestRecipeTagVal = await TagValues.findOne({
-                        where: {
-                            tagId: recipeTag.id,
-                            createdAt: { [Op.lte]: operationTime }
-                        },
-                        order: [['createdAt', 'DESC']],
-                        transaction
-                    });
-
-                    if (latestRecipeTagVal) {
-                        const recipeNumber = parseInt(latestRecipeTagVal.value);
-                        const recipe = await sequelize.query(
-                            `SELECT r.id, r.skuId 
-                             FROM recipes r
-                             JOIN linerecipies lr ON r.id = lr.recipieId  
-                             WHERE r.number = :recipeNumber 
-                             AND lr.lineId = :lineId 
-                             LIMIT 1`,
-                            {
-                                replacements: { recipeNumber, lineId },
-                                type: sequelize.QueryTypes.SELECT,
-                                transaction
-                            }
-                        );
-
-                        if (recipe.length > 0 && recipe[0].skuId) {
-                            skuId = recipe[0].skuId;
-                            console.log(`📦 RIM L3 Found SKU ${skuId} from recipe ${recipeNumber} for new job`);
-                        }
-                    }
-                }
+                // Resolve SKU from recipe tag BEFORE creating the job
+                const skuId = await resolveSkuForLine(lineId, operationTime, transaction);
 
                 const newJob = await Job.create({
                     jobName,
@@ -2701,7 +2517,7 @@ async function processSpecialTagOperationRIML3(tag, value, operationTime, utcNow
                     actualEndTime: null,
                     lineId,
                     programId: activeProgram.id,
-                    skuId: skuId
+                    skuId
                 }, { transaction });
 
                 console.log(`✅ Created new RIM L3 job ${newJob.id} for line ${lineId} under program ${activeProgram.id}${skuId ? ` with SKU ${skuId}` : ' (no SKU found)'}`);
