@@ -3,9 +3,6 @@ const emailConfig = require('../../config/email.config');
 const emailService = require('./EmailService');
 const logger = require('../logger');
 
-const lastSuccessfulSend = new Map();
-const COOLDOWN_MS = parseInt(process.env.AGGREGATION_ALERT_COOLDOWN_MS || '600000', 10);
-
 function escapeHtml(s) {
   if (s == null) return '';
   return String(s)
@@ -15,19 +12,9 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-function isThrottled(jobId, phase) {
-  const key = `${jobId}|${phase}`;
-  const prev = lastSuccessfulSend.get(key);
-  return prev != null && Date.now() - prev < COOLDOWN_MS;
-}
-
-function markSuccessfulSend(jobId, phase) {
-  lastSuccessfulSend.set(`${jobId}|${phase}`, Date.now());
-}
-
 /**
  * Send one operational email when an aggregation / recalculation step fails.
- * Does not throw; logs on failure. Throttles duplicate alerts per job+phase (default 10 min).
+ * Does not throw; logs on failure. Sends on every failure (no throttle).
  *
  * @param {Object} params
  * @param {string} params.phase - e.g. alarm_aggregation, machine_state_aggregation, oee_timeseries
@@ -36,19 +23,9 @@ function markSuccessfulSend(jobId, phase) {
  * @param {Object} [params.extra] - optional serializable context (queueJobId, attempts, etc.)
  */
 async function notifyAggregationFailure({ phase, jobId, error, extra = {} }) {
-  const alerts = emailConfig.operationalAlerts;
-  if (!alerts || !alerts.enableAggregationFailureEmail) {
-    return;
-  }
-
-  const recipients = alerts.aggregationFailureRecipients || [];
+  const recipients = emailConfig.operationalAlerts?.aggregationFailureRecipients || [];
   if (recipients.length === 0) {
-    logger.warn('Aggregation failure email skipped: no recipients', { phase, jobId });
-    return;
-  }
-
-  if (isThrottled(jobId, phase)) {
-    logger.info('Aggregation failure email throttled (cooldown)', { jobId, phase, cooldownMs: COOLDOWN_MS });
+    logger.warn('Aggregation failure email skipped: no recipients configured', { phase, jobId });
     return;
   }
 
@@ -103,7 +80,6 @@ async function notifyAggregationFailure({ phase, jobId, error, extra = {} }) {
     });
 
     if (result.success) {
-      markSuccessfulSend(jobId, phase);
       logger.info('Aggregation failure alert email sent', { jobId, phase, correlationId });
     }
   } catch (notifyErr) {
