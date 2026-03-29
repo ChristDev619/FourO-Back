@@ -169,10 +169,11 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
                 }
 
                 // IMPORTANT: Use raw DB timestamps for qualification parity with historical
+                // Get baseline value STRICTLY BEFORE alarm start (not at or before)
                 const firstValueRecord = await TagValues.findOne({
                     where: {
                         tagId: outputTag.id,
-                        createdAt: { [Op.lte]: alarmStartTime }
+                        createdAt: { [Op.lt]: alarmStartTime }
                     },
                     order: [['createdAt', 'DESC']],
                     raw: true
@@ -778,7 +779,7 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     }
     
     // Enrich alarms with machine qualification times (calculated at runtime)
-    const alarmsWithQualification = await enrichAlarmsWithQualification(alarms, job, db, Op, sequelize);
+    const alarmsWithQualification = await enrichAlarmsWithQualification(alarms, job, db, Op, sequelize, effectiveEndTime);
     
     const formattedAlarms = formatAlarms(alarmsWithQualification, isLiveMode);
 

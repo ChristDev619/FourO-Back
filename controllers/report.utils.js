@@ -403,10 +403,13 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op, Line }, lin
 }
 
 // Helper: Enrich alarms with machine qualification times (calculated at runtime)
-async function enrichAlarmsWithQualification(alarms, job, db, Op, sequelize) {
+async function enrichAlarmsWithQualification(alarms, job, db, Op, sequelize, effectiveEndTime = null) {
     // Get unique machines from alarms
     const uniqueMachineIds = [...new Set(alarms.map(a => a.machineId))];
     const qualificationMap = {};
+    
+    // Use effectiveEndTime if provided, otherwise use job.actualEndTime (for backwards compatibility)
+    const endTime = effectiveEndTime || job.actualEndTime;
     
     console.log(`\n🔍 [REPORT] Calculating qualification times for ${uniqueMachineIds.length} machines...`);
     
@@ -458,7 +461,7 @@ async function enrichAlarmsWithQualification(alarms, job, db, Op, sequelize) {
             where: {
                 tagId: outputTag.id,
                 createdAt: {
-                    [Op.between]: [job.actualStartTime, job.actualEndTime]
+                    [Op.between]: [job.actualStartTime, endTime]
                 },
                 [Op.and]: [
                     sequelize.literal(`CAST(value AS DECIMAL(20,2)) > ${baselineValue}`)
