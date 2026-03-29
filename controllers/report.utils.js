@@ -410,6 +410,7 @@ async function enrichAlarmsWithQualification(alarms, job, db, Op, sequelize, eff
     
     // Use effectiveEndTime if provided, otherwise use job.actualEndTime (for backwards compatibility)
     const endTime = effectiveEndTime || job.actualEndTime;
+    const isLiveMode = !job.actualEndTime; // Live if job hasn't ended yet
     
     console.log(`\n🔍 [REPORT] Calculating qualification times for ${uniqueMachineIds.length} machines...`);
     
@@ -457,16 +458,20 @@ async function enrichAlarmsWithQualification(alarms, job, db, Op, sequelize, eff
         const baselineValue = parseFloat(baselineRecord.value);
         
         // Step 3: Find first time value INCREASED above baseline during job
+        // For live mode: don't use upper time bound (TagValues timestamps are correct, DB clock may be behind)
+        // For historical: use BETWEEN to limit search to job timeframe
+        const whereClause = {
+            tagId: outputTag.id,
+            createdAt: isLiveMode 
+                ? { [Op.gte]: job.actualStartTime }
+                : { [Op.between]: [job.actualStartTime, endTime] },
+            [Op.and]: [
+                sequelize.literal(`CAST(value AS DECIMAL(20,2)) > ${baselineValue}`)
+            ]
+        };
+        
         const firstIncreaseRecord = await db.TagValues.findOne({
-            where: {
-                tagId: outputTag.id,
-                createdAt: {
-                    [Op.between]: [job.actualStartTime, endTime]
-                },
-                [Op.and]: [
-                    sequelize.literal(`CAST(value AS DECIMAL(20,2)) > ${baselineValue}`)
-                ]
-            },
+            where: whereClause,
             order: [['createdAt', 'ASC']],
             attributes: ['createdAt', 'value']
         });

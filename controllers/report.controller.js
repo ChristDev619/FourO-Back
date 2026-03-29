@@ -31,6 +31,7 @@ const { QueryTypes } = require("sequelize");
 const TagRefs = require("../utils/constants/TagRefs");
 const STATE_CONFIG = require("../utils/constants/StateConfig");
 const { generateAlarmJoinCondition } = require("../utils/alarmUtils");
+const { logLive, logSeparator } = require("../utils/liveReportLogger");
 const {
     getTagValuesDifference,
     getProductionCountWithFallback,
@@ -71,6 +72,11 @@ async function getCurrentTagValue(tagId) {
 // Helper function to get live alarms from TagValues for running jobs
 async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, TagValues, Op, Machine, Alarm, generateAlarmJoinCondition }) {
     try {
+        logSeparator();
+        logLive(`🔴 LIVE ALARMS - Job ${job.id} - Started`);
+        logLive(`Job Start Time: ${job.actualStartTime}`);
+        logLive(`Machine IDs: ${machineIds.join(', ')}`);
+        
         console.log(`\n[LIVE ALARMS] Fetching real-time alarms for running job ${job.id}`);
         console.log(`  Job Start: ${job.actualStartTime}`);
         console.log(`  Job End: NOW() (job still running)`);
@@ -89,20 +95,28 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
         
         if (!alarmTags || alarmTags.length === 0) {
             console.log(`[LIVE ALARMS] No alarm tags found for machines: ${machineIds.join(', ')}`);
+            logLive(`❌ No alarm tags found for machines`);
             return [];
         }
         
         console.log(`[LIVE ALARMS] Found ${alarmTags.length} alarm tags`);
+        logLive(`✅ Found ${alarmTags.length} alarm tags`, alarmTags.map(t => ({
+            tagId: t.id,
+            tagName: t.name,
+            machineId: t.taggableId,
+            ref: t.ref
+        })));
         const tagIds = alarmTags.map(t => t.id);
         
-        // Step 2: Get all TagValues for these alarm tags within job timeframe
+        // Step 2: Get all TagValues for these alarm tags from job start onwards (no upper limit for live)
+        // Note: Don't use NOW() upper bound - TagValues timestamps come from line API (correct time)
+        // while DB server clock may be behind, causing query to miss recent data
+        logLive(`📊 Querying TagValues: tagIds IN (${tagIds.join(', ')}), createdAt >= ${job.actualStartTime}`);
+        
         const tagValues = await TagValues.findAll({
             where: {
                 tagId: { [Op.in]: tagIds },
-                createdAt: {
-                    [Op.gte]: job.actualStartTime,
-                    [Op.lte]: new Date() // Up to NOW()
-                }
+                createdAt: { [Op.gte]: job.actualStartTime }
             },
             order: [['tagId', 'ASC'], ['createdAt', 'ASC']],
             raw: true
@@ -110,16 +124,21 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
         
         if (!tagValues || tagValues.length === 0) {
             console.log(`[LIVE ALARMS] No tag values found for alarm tags`);
+            logLive(`❌ No TagValues found for alarm tags (Query returned empty)`);
             return [];
         }
         
         console.log(`[LIVE ALARMS] Found ${tagValues.length} tag value records to process`);
+        logLive(`✅ Found ${tagValues.length} TagValue records`);
+        logLive(`📅 First TagValue timestamp: ${tagValues[0].createdAt}`);
+        logLive(`📅 Last TagValue timestamp: ${tagValues[tagValues.length - 1].createdAt}`);
 
         // Cache OutputTotal tags by machine for faster live qualification checks
         const outputTagCache = new Map();
 
         // Historical parity: only qualify alarm intervals where OutputTotal increased
-        const checkOutputTotalDuringAlarmLive = async (machineId, lineId, alarmStartTime, alarmEndTime) => {
+        // FIXED: Check from JOB START (not alarm start) to match historical behavior
+        const checkOutputTotalDuringAlarmLive = async (machineId, lineId, jobStartTime, alarmEndTime) => {
             try {
                 let outputTag = outputTagCache.get(machineId);
 
@@ -168,17 +187,19 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
                     };
                 }
 
-                // IMPORTANT: Use raw DB timestamps for qualification parity with historical
-                // Get baseline value STRICTLY BEFORE alarm start (not at or before)
+                // IMPORTANT: Check from BEFORE JOB START (not alarm start) to match historical
+                // Get baseline value STRICTLY BEFORE job start
+                logLive(`      🔎 Looking for OutputTotal baseline (tagId ${outputTag.id}, createdAt < ${jobStartTime})`);
                 const firstValueRecord = await TagValues.findOne({
                     where: {
                         tagId: outputTag.id,
-                        createdAt: { [Op.lt]: alarmStartTime }
+                        createdAt: { [Op.lt]: jobStartTime }
                     },
                     order: [['createdAt', 'DESC']],
                     raw: true
                 });
 
+                logLive(`      🔎 Looking for OutputTotal at alarm end (tagId ${outputTag.id}, createdAt <= ${alarmEndTime})`);
                 const lastValueRecord = await TagValues.findOne({
                     where: {
                         tagId: outputTag.id,
@@ -189,6 +210,7 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
                 });
 
                 if (!firstValueRecord || !lastValueRecord) {
+                    logLive(`      ❌ Missing OutputTotal values: firstRecord=${!!firstValueRecord}, lastRecord=${!!lastValueRecord}`);
                     return {
                         increased: false,
                         firstValue: null,
@@ -201,6 +223,7 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
                 const firstValue = parseFloat(firstValueRecord.value);
                 const lastValue = parseFloat(lastValueRecord.value);
                 const increased = Number.isFinite(firstValue) && Number.isFinite(lastValue) && lastValue > firstValue;
+                logLive(`      📊 OutputTotal comparison: baseline=${firstValue} (${firstValueRecord.createdAt}), end=${lastValue} (${lastValueRecord.createdAt}), increased=${increased}`);
                 return {
                     increased,
                     firstValue,
@@ -221,6 +244,7 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
         };
         
         // Step 3: Process tag values to identify alarm sequences
+        logLive(`🔍 Processing alarm sequences...`);
         const alarms = [];
         const machineQualifiedOnce = new Map(); // machineId -> true after first positive OutputTotal interval
         const tagMap = new Map();
@@ -232,6 +256,8 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
             if (!valuesByTag[tv.tagId]) valuesByTag[tv.tagId] = [];
             valuesByTag[tv.tagId].push(tv);
         });
+        
+        logLive(`📦 Grouped into ${Object.keys(valuesByTag).length} tag groups`);
         
         // Process each tag's values
         for (const [tagIdStr, values] of Object.entries(valuesByTag)) {
@@ -262,20 +288,26 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
                             let allowAlarm = alreadyQualified;
                             let outputCheck = null;
                             if (!alreadyQualified) {
+                                logLive(`⚙️ Checking qualification for machine ${tag.taggableId} (alarm code ${currentAlarm})`);
                                 outputCheck = await checkOutputTotalDuringAlarmLive(
                                     tag.taggableId,
                                     job.lineId,
-                                    alarmStartTime,
+                                    job.actualStartTime,
                                     alarmEndTime
                                 );
+                                logLive(`   OutputTotal check result:`, outputCheck);
                                 if (outputCheck.increased) {
                                     machineQualifiedOnce.set(tag.taggableId, true);
                                     allowAlarm = true;
+                                    logLive(`   ✅ Machine ${tag.taggableId} QUALIFIED (first time)`);
+                                } else {
+                                    logLive(`   ❌ Machine ${tag.taggableId} NOT qualified - Reason: ${outputCheck.reason}`);
                                 }
                             }
                             if (allowAlarm) {
                                 const qMode = alreadyQualified ? "carry_forward" : "first_positive_interval";
                                 console.log(`[LIVE ALARMS][QUALIFIED] machine=${tag.taggableId} tag=${tagId} code=${currentAlarm} start=${alarmStartTime} end=${alarmEndTime} duration=${durationMinutes.toFixed(2)} mode=${qMode}`);
+                                logLive(`✅ ALARM ADDED: Machine ${tag.taggableId}, Code ${currentAlarm}, Duration ${durationMinutes.toFixed(2)} min, Mode: ${qMode}`);
                                 alarms.push({
                                     tagId: tagId,
                                     machineId: tag.taggableId,
@@ -314,7 +346,7 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
                             outputCheck = await checkOutputTotalDuringAlarmLive(
                                 tag.taggableId,
                                 job.lineId,
-                                alarmStartTime,
+                                job.actualStartTime,
                                 alarmEndTime
                             );
                             if (outputCheck.increased) {
@@ -353,7 +385,7 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
             // Handle alarm that's still active (last value was not "0")
             if (currentAlarm !== null && alarmStartTime !== null) {
                 const lastValue = values[values.length - 1];
-                const alarmEndTime = new Date(); // Use NOW() for ongoing alarms
+                const alarmEndTime = new Date(); // Use current time for ongoing alarms
                 const alarmStartTimeForDuration =
                     liveInstantFromDbDate(alarmStartTime) || dayjs(alarmStartTime);
                 const durationMinutes = dayjs(alarmEndTime).diff(alarmStartTimeForDuration, 'minute', true);
@@ -366,7 +398,7 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
                         outputCheck = await checkOutputTotalDuringAlarmLive(
                             tag.taggableId,
                             job.lineId,
-                            alarmStartTime,
+                            job.actualStartTime,
                             alarmEndTime
                         );
                         if (outputCheck.increased) {
@@ -400,10 +432,22 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
         
         if (alarms.length === 0) {
             console.log(`[LIVE ALARMS] No alarms found (>= 5 minutes duration)`);
+            logLive(`⚠️ NO ALARMS >= 5 minutes found`);
+            logLive(`Machine qualification status:`, Array.from(machineQualifiedOnce.entries()).map(([machineId, qualified]) => ({
+                machineId,
+                qualified
+            })));
             return [];
         }
         
         console.log(`[LIVE ALARMS] Processed ${alarms.length} alarms (>= 5 min duration)`);
+        logLive(`✅ Found ${alarms.length} live alarms >= 5 min`, alarms.map(a => ({
+            machineId: a.machineId,
+            alarmCode: a.alarmCode,
+            duration: a.duration,
+            startTime: a.alarmStartDateTime,
+            endTime: a.alarmEndDateTime
+        })));
         
         // Step 4: Enrich alarms with machine names and alarm descriptions
         const enrichedAlarms = [];
@@ -456,10 +500,17 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
         }
         
         console.log(`[LIVE ALARMS] Successfully enriched ${enrichedAlarms.length} alarms with machine/alarm details`);
+        logLive(`🎉 LIVE ALARMS COMPLETE: Returning ${enrichedAlarms.length} enriched alarms`);
+        logSeparator();
         return enrichedAlarms;
         
     } catch (error) {
         console.error('[LIVE ALARMS] Error fetching live alarms:', error);
+        logLive(`❌ ERROR in getLiveAlarms:`, {
+            error: error.message,
+            stack: error.stack
+        });
+        logSeparator();
         return [];
     }
 }
@@ -467,6 +518,10 @@ async function getLiveAlarms({ job, machineIds, sequelize, QueryTypes, Tags, Tag
 // Helper function to get live machine states from TagValues for running jobs
 async function getLiveMachineStates({ job, machineId, sequelize, QueryTypes, Tags, TagValues, Op }) {
     try {
+        logSeparator();
+        logLive(`🟢 LIVE MACHINE STATES - Job ${job.id} - Started`);
+        logLive(`Job Start: ${job.actualStartTime}, Bottleneck Machine: ${machineId}`);
+        
         console.log(`\n[LIVE MACHINE STATES] Fetching real-time machine states for job ${job.id}`);
         console.log(`  Job Start: ${job.actualStartTime}`);
         console.log(`  Job End: NOW() (job still running)`);
@@ -490,14 +545,13 @@ async function getLiveMachineStates({ job, machineId, sequelize, QueryTypes, Tag
         
         console.log(`[LIVE MACHINE STATES] Found state tag: ${stateTag.name} (ID: ${stateTag.id})`);
         
-        // Step 2: Get all TagValues for this state tag within job timeframe
+        // Step 2: Get all TagValues for this state tag from job start onwards (no upper limit for live)
+        // Note: Don't use NOW() upper bound - TagValues timestamps come from line API (correct time)
+        // while DB server clock may be behind, causing query to miss recent data
         const tagValues = await TagValues.findAll({
             where: {
                 tagId: stateTag.id,
-                createdAt: {
-                    [Op.gte]: job.actualStartTime,
-                    [Op.lte]: new Date() // Up to NOW()
-                }
+                createdAt: { [Op.gte]: job.actualStartTime }
             },
             order: [['createdAt', 'ASC']],
             raw: true
@@ -600,10 +654,24 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     console.log(`\n[REPORT] extractJobReportData - Job ID: ${job.id}, Program ID: ${program.id}`);
     console.log(`  Job Dates: ${job.actualStartTime} to ${job.actualEndTime}`);
     console.log(`  Program Dates: ${program.startDate} to ${program.endDate}`);
-    
-    // For live reports (running jobs), use NOW() as effective end time
+
+    // For live reports (running jobs), use NOW() from database as effective end time (UTC fix)
     // For completed reports, use actualEndTime (existing behavior)
-    const effectiveEndTime = isLiveMode ? new Date() : job.actualEndTime;
+    let effectiveEndTime;
+    if (isLiveMode) {
+        logSeparator();
+        logLive(`🟦 LIVE REPORT - extractJobReportData - Job ${job.id} - Started`);
+        logLive(`Job Start: ${job.actualStartTime}, Job End: NULL (running)`);
+        logLive(`Program: ${program.id}, Line: ${line.id}, Machines: ${machineIds.join(', ')}`);
+        
+        const dbNowResult = await sequelize.query('SELECT NOW() as now', {
+            type: QueryTypes.SELECT
+        });
+        effectiveEndTime = new Date(dbNowResult[0].now);
+        logLive(`Database NOW(): ${effectiveEndTime}`);
+    } else {
+        effectiveEndTime = job.actualEndTime;
+    }
     
     if (isLiveMode) {
         console.log(`[LIVE REPORT] Using NOW() as effective end time: ${effectiveEndTime}`);
@@ -730,6 +798,7 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     if (isLiveMode) {
         // LIVE MODE: Query TagValues directly for real-time alarm data
         console.log('[LIVE REPORT] Fetching live alarms from TagValues...');
+        logLive(`📞 Calling getLiveAlarms()...`);
         alarms = await getLiveAlarms({ 
             job, 
             machineIds, 
@@ -743,6 +812,7 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
             generateAlarmJoinCondition 
         });
         console.log(`[LIVE REPORT] Found ${alarms.length} live alarms`);
+        logLive(`📥 getLiveAlarms returned ${alarms.length} alarms`);
     } else {
         // HISTORICAL MODE: Query AlarmAggregations (existing behavior)
         console.log('[HISTORICAL REPORT] Fetching alarms from AlarmAggregations...');
@@ -2729,7 +2799,7 @@ module.exports = {
             let jobDiagnostic = null;
             if (runningJob) {
                 const program = runningJob.program;
-                const effectiveEndTime = new Date();
+                const effectiveEndTime = new Date(dbTimeInfo[0].db_now); // Use database NOW()
                 const jobStartDbg = liveInstantFromDbDate(runningJob.actualStartTime) || dayjs(runningJob.actualStartTime);
                 const progStartDbg = program?.startDate
                     ? (liveInstantFromDbDate(program.startDate) || dayjs(program.startDate))
