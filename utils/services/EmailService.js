@@ -109,6 +109,16 @@ class EmailService {
       return { success: false, message: 'Email service not configured' };
     }
 
+    const toRecipients = (Array.isArray(to) ? to : [to])
+      .map((addr) => (typeof addr === 'string' ? addr.trim() : String(addr)))
+      .filter(Boolean)
+      .map((address) => ({ address }));
+
+    if (toRecipients.length === 0) {
+      logger.warn('Email send skipped: no valid recipients', { subject });
+      return { success: false, message: 'No recipients' };
+    }
+
     const correlationId = metadata.correlationId || crypto.randomUUID();
     const startTime = Date.now();
 
@@ -121,12 +131,12 @@ class EmailService {
           plainText: textContent || this.stripHtml(htmlContent),
         },
         recipients: {
-          to: [{ address: to }],
+          to: toRecipients,
         },
       };
 
       logger.info('Sending email via Azure Communication Services', {
-        to,
+        to: toRecipients.map((r) => r.address),
         subject,
         correlationId,
         metadata,
@@ -138,7 +148,7 @@ class EmailService {
       const duration = Date.now() - startTime;
 
       logger.info('Email sent successfully', {
-        to,
+        to: toRecipients.map((r) => r.address),
         subject,
         messageId: response.id,
         status: response.status,
@@ -151,7 +161,7 @@ class EmailService {
         appInsights.defaultClient?.trackEvent({
           name: 'EmailSent',
           properties: {
-            to,
+            to: toRecipients.map((r) => r.address).join(', '),
             subject,
             messageId: response.id,
             status: response.status,
@@ -173,7 +183,7 @@ class EmailService {
       const duration = Date.now() - startTime;
 
       logger.error('Failed to send email', {
-        to,
+        to: toRecipients.map((r) => r.address),
         subject,
         error: error.message,
         stack: error.stack,
@@ -186,7 +196,7 @@ class EmailService {
         appInsights.defaultClient?.trackException({
           exception: error,
           properties: {
-            to,
+            to: toRecipients.map((r) => r.address).join(', '),
             subject,
             correlationId,
             ...metadata,

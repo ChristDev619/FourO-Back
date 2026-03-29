@@ -62,5 +62,19 @@ module.exports = {
     logEmailSends: true,
     logEmailFailures: true,
   },
+
+  /**
+   * Operational alerts (aggregation failures, etc.)
+   * Override recipients with AGGREGATION_ALERT_RECIPIENTS=comma@separated,list
+   * Disable with ENABLE_AGGREGATION_FAILURE_EMAIL=false
+   */
+  operationalAlerts: {
+    enableAggregationFailureEmail: process.env.ENABLE_AGGREGATION_FAILURE_EMAIL !== 'false',
+    aggregationFailureRecipients: (process.env.AGGREGATION_ALERT_RECIPIENTS
+      || 'christian_chindy@hotmail.com,falam@teknologix-automation.com')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  },
 };
 

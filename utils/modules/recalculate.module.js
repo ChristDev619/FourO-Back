@@ -6,6 +6,7 @@ const {
 
 const logger = require("../logger");
 const { JobNotFoundError } = require("../errors");
+const { notifyAggregationFailure } = require("../services/AggregationFailureNotifier");
 
 const {
   aggregateAlarms,
@@ -46,46 +47,60 @@ try {
   logger.warn('Failed to send recalculation start notification', { jobId, error: notificationError.message });
 }
 
-  // Step 1: Save existing alarm reasons and notes before destruction
-  const existingAlarmData = await AlarmAggregation.findAll({
-    where: { 
-      jobId,
-      [Op.or]: [
-        { alarmReasonId: { [Op.not]: null } },
-        { alarmNote: { [Op.not]: null } }
-      ]
-    },
-    attributes: [
-      'machineId', 
-      'tagId', 
-      'alarmCode', 
-      'alarmStartDateTime', 
-      'alarmEndDateTime',
-      'alarmReasonId', 
-      'alarmReasonName', 
-      'alarmNote'
-    ],
-    transaction
-  });
+  let alarmDataMap;
 
-  // Create a lookup map for existing alarm data
-  const alarmDataMap = new Map();
-  existingAlarmData.forEach(alarm => {
-    // Create a unique key for each alarm based on machine, tag, code, and time
-    const key = `${alarm.machineId}_${alarm.tagId}_${alarm.alarmCode}_${alarm.alarmStartDateTime}_${alarm.alarmEndDateTime}`;
-    alarmDataMap.set(key, {
-      alarmReasonId: alarm.alarmReasonId,
-      alarmReasonName: alarm.alarmReasonName,
-      alarmNote: alarm.alarmNote
+  try {
+    // Step 1: Save existing alarm reasons and notes before destruction
+    const existingAlarmData = await AlarmAggregation.findAll({
+      where: { 
+        jobId,
+        [Op.or]: [
+          { alarmReasonId: { [Op.not]: null } },
+          { alarmNote: { [Op.not]: null } }
+        ]
+      },
+      attributes: [
+        'machineId', 
+        'tagId', 
+        'alarmCode', 
+        'alarmStartDateTime', 
+        'alarmEndDateTime',
+        'alarmReasonId', 
+        'alarmReasonName', 
+        'alarmNote'
+      ],
+      transaction
     });
-  });
 
-  // Step 2: Destroy existing aggregations
-  await AlarmAggregation.destroy({ where: { jobId }, transaction });
-  await MachineStateAggregation.destroy({ where: { jobId }, transaction });
+    // Create a lookup map for existing alarm data
+    alarmDataMap = new Map();
+    existingAlarmData.forEach(alarm => {
+      // Create a unique key for each alarm based on machine, tag, code, and time
+      const key = `${alarm.machineId}_${alarm.tagId}_${alarm.alarmCode}_${alarm.alarmStartDateTime}_${alarm.alarmEndDateTime}`;
+      alarmDataMap.set(key, {
+        alarmReasonId: alarm.alarmReasonId,
+        alarmReasonName: alarm.alarmReasonName,
+        alarmNote: alarm.alarmNote
+      });
+    });
 
-  // Step 3: Recreate aggregations (using JavaScript-based function with correct alarm sequence detection)
-  await aggregateAlarms(jobId, transaction);
+    // Step 2: Destroy existing aggregations
+    await AlarmAggregation.destroy({ where: { jobId }, transaction });
+    await MachineStateAggregation.destroy({ where: { jobId }, transaction });
+  } catch (prepareError) {
+    logger.error('Aggregation prepare failed (load/destroy)', { jobId, error: prepareError.message, stack: prepareError.stack });
+    await notifyAggregationFailure({ phase: 'aggregation_prepare', jobId, error: prepareError });
+    throw prepareError;
+  }
+
+  try {
+    // Step 3: Recreate aggregations (using JavaScript-based function with correct alarm sequence detection)
+    await aggregateAlarms(jobId, transaction);
+  } catch (alarmAggError) {
+    logger.error('Alarm aggregation failed', { jobId, error: alarmAggError.message, stack: alarmAggError.stack });
+    await notifyAggregationFailure({ phase: 'alarm_aggregation', jobId, error: alarmAggError });
+    throw alarmAggError;
+  }
   
   // Notify alarm aggregation completion
   try {
@@ -104,7 +119,13 @@ try {
     logger.warn('Failed to send alarm aggregation notification', { jobId, error: notificationError.message });
   }
 
-  await aggregateMachineStates(jobId, transaction);
+  try {
+    await aggregateMachineStates(jobId, transaction);
+  } catch (machineStateError) {
+    logger.error('Machine state aggregation failed', { jobId, error: machineStateError.message, stack: machineStateError.stack });
+    await notifyAggregationFailure({ phase: 'machine_state_aggregation', jobId, error: machineStateError });
+    throw machineStateError;
+  }
   
   // Notify machine state aggregation completion
   try {
@@ -123,39 +144,45 @@ try {
     logger.warn('Failed to send machine state aggregation notification', { jobId, error: notificationError.message });
   }
 
-  // Step 4: Restore the saved alarm reasons and notes
-  if (alarmDataMap.size > 0) {
-    const newAlarms = await AlarmAggregation.findAll({
-      where: { jobId },
-      transaction
-    });
+  try {
+    // Step 4: Restore the saved alarm reasons and notes
+    if (alarmDataMap.size > 0) {
+      const newAlarms = await AlarmAggregation.findAll({
+        where: { jobId },
+        transaction
+      });
 
-    for (const newAlarm of newAlarms) {
-      const key = `${newAlarm.machineId}_${newAlarm.tagId}_${newAlarm.alarmCode}_${newAlarm.alarmStartDateTime}_${newAlarm.alarmEndDateTime}`;
-      const savedData = alarmDataMap.get(key);
-      
-      if (savedData) {
-        await newAlarm.update({
-          alarmReasonId: savedData.alarmReasonId,
-          alarmReasonName: savedData.alarmReasonName,
-          alarmNote: savedData.alarmNote
-        }, { transaction });
+      for (const newAlarm of newAlarms) {
+        const key = `${newAlarm.machineId}_${newAlarm.tagId}_${newAlarm.alarmCode}_${newAlarm.alarmStartDateTime}_${newAlarm.alarmEndDateTime}`;
+        const savedData = alarmDataMap.get(key);
+        
+        if (savedData) {
+          await newAlarm.update({
+            alarmReasonId: savedData.alarmReasonId,
+            alarmReasonName: savedData.alarmReasonName,
+            alarmNote: savedData.alarmNote
+          }, { transaction });
+        }
       }
     }
-  }
 
-  // --- TEMP FIX: Delete alarm durations > 15min (REMOVE LATER) --- //christ to check to remove later ask joelle about this
-  // Scope deletion to KL1 (lineId 22) Robopac (machineId 14) FirstFault tag (tagId 119)
-  await AlarmAggregation.destroy({
-    where: {
-      jobId,
-      lineId: 22,
-      machineId: 14,
-      tagId: 119,
-      duration: { [Op.gt]: 20 }
-    },
-    transaction
-  });
+    // --- TEMP FIX: Delete alarm durations > 15min (REMOVE LATER) --- //christ to check to remove later ask joelle about this
+    // Scope deletion to KL1 (lineId 22) Robopac (machineId 14) FirstFault tag (tagId 119)
+    await AlarmAggregation.destroy({
+      where: {
+        jobId,
+        lineId: 22,
+        machineId: 14,
+        tagId: 119,
+        duration: { [Op.gt]: 20 }
+      },
+      transaction
+    });
+  } catch (postProcessError) {
+    logger.error('Aggregation post-process failed (restore reasons / temp delete)', { jobId, error: postProcessError.message, stack: postProcessError.stack });
+    await notifyAggregationFailure({ phase: 'aggregation_post_process', jobId, error: postProcessError });
+    throw postProcessError;
+  }
 
   // Step 5: OEE Time Series recalculation
   try {
@@ -197,8 +224,16 @@ try {
         errorCode: oeeError.code,
         errorMetadata: oeeError.metadata
       });
+      await notifyAggregationFailure({
+        phase: 'oee_timeseries_job_not_found',
+        jobId,
+        error: oeeError,
+        extra: { errorCode: oeeError.code },
+      });
       throw oeeError; // Re-throw to trigger Bull retry/DLQ
     }
+
+    await notifyAggregationFailure({ phase: 'oee_timeseries', jobId, error: oeeError });
     
     // Notify OEE Time Series failure
     try {

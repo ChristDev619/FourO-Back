@@ -12,6 +12,7 @@ const {
 const logger = require('../utils/logger');
 const { ensureQueueRunning } = require('../utils/queues/queueHealthCheck');
 const { addToDeadLetterQueue } = require('../utils/queues/deadLetterQueue');
+const { notifyAggregationFailure } = require('../utils/services/AggregationFailureNotifier');
 
 // Concurrency configurable via environment; clamp to safe range [1..4]
 const concurrency = Math.max(1, Math.min(parseInt(process.env.QUEUE_CONCURRENCY || '1', 10), 4));
@@ -66,6 +67,20 @@ recalculationQueue.on('failed', async (job, err) => {
         attempts: attemptsMade,
         error: err && err.message
       });
+
+      const productionJobId = job && job.data && job.data.jobId;
+      if (productionJobId != null) {
+        await notifyAggregationFailure({
+          phase: 'recalculation_permanent_failure',
+          jobId: productionJobId,
+          error: err,
+          extra: {
+            queueJobId: job && job.id,
+            attemptsMade,
+            maxAttempts,
+          },
+        });
+      }
       
       // Add to Dead Letter Queue for manual review/retry
       const success = await addToDeadLetterQueue(job, err);
