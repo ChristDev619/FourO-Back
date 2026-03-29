@@ -104,8 +104,26 @@ async function checkMachineQualification(machineId, job, transaction) {
         const lastValue = parseFloat(lastValueRecord.value);
 
         if (lastValue > firstValue) {
+            console.log(`     🔎 Finding EXACT timestamp when production started...`);
+            
+            // Find the EXACT timestamp when OutputTotal first exceeded baseline
+            const productionStartRecord = await db.TagValues.findOne({
+                where: {
+                    tagId: outputTag.id,
+                    createdAt: { [Op.between]: [job.actualStartTime, job.actualEndTime] },
+                    value: { [Op.gt]: firstValue }
+                },
+                order: [['createdAt', 'ASC']],
+                transaction
+            });
+            
+            const exactStartTime = productionStartRecord 
+                ? productionStartRecord.createdAt 
+                : job.actualStartTime;
+            
             console.log(`     ✅ QUALIFIED: OutputTotal increased from ${firstValue} → ${lastValue} (produced ${lastValue - firstValue} units)`);
-            return { qualified: true, productionStartTime: job.actualStartTime };
+            console.log(`     🎯 Production started at: ${exactStartTime}`);
+            return { qualified: true, productionStartTime: exactStartTime };
         } else {
             console.log(`     ❌ DISQUALIFIED: OutputTotal did NOT increase during job (${firstValue} → ${lastValue})`);
             return { qualified: false, productionStartTime: null };
@@ -729,6 +747,7 @@ async function aggregateAlarmsSQL(jobId, transaction = null) {
         // Step 1b: Check which machines actually qualify (OutputTotal > 0)
         console.log(`\n🔍 Step 1b: Checking which machines actually produced (OutputTotal > 0)...`);
         const qualifiedMachines = [];
+        
         for (const machine of machinesWithAlarms) {
             // Try machine-level OutputTotal first
             let hasProduction = await sequelize.query(`

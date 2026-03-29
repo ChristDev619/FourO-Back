@@ -402,6 +402,87 @@ async function getProductionCountWithFallback({ Tags, TagValues, Op, Line }, lin
     }
 }
 
+// Helper: Enrich alarms with machine qualification times (calculated at runtime)
+async function enrichAlarmsWithQualification(alarms, job, db, Op, sequelize) {
+    // Get unique machines from alarms
+    const uniqueMachineIds = [...new Set(alarms.map(a => a.machineId))];
+    const qualificationMap = {};
+    
+    console.log(`\n🔍 [REPORT] Calculating qualification times for ${uniqueMachineIds.length} machines...`);
+    
+    for (const machineId of uniqueMachineIds) {
+        // Step 1: Find OutputTotal tag (machine-level first)
+        let outputTag = await db.Tags.findOne({
+            where: {
+                taggableType: 'machine',
+                taggableId: machineId,
+                name: { [Op.like]: '%_OutputTotal' }
+            }
+        });
+        
+        // If not found at machine level, try line level
+        if (!outputTag) {
+            outputTag = await db.Tags.findOne({
+                where: {
+                    taggableType: 'line',
+                    taggableId: job.lineId,
+                    name: { [Op.like]: '%_OutputTotal' }
+                }
+            });
+        }
+        
+        if (!outputTag) {
+            console.log(`   ⚠️  Machine ${machineId}: No OutputTotal tag found`);
+            continue;
+        }
+        
+        // Step 2: Get baseline value (first value at or BEFORE job start)
+        const baselineRecord = await db.TagValues.findOne({
+            where: {
+                tagId: outputTag.id,
+                createdAt: { [Op.lte]: job.actualStartTime }
+            },
+            order: [['createdAt', 'DESC']],
+            attributes: ['value', 'createdAt']
+        });
+        
+        if (!baselineRecord) {
+            console.log(`   ⚠️  Machine ${machineId}: No baseline value found`);
+            continue;
+        }
+        
+        const baselineValue = parseFloat(baselineRecord.value);
+        
+        // Step 3: Find first time value INCREASED above baseline during job
+        const firstIncreaseRecord = await db.TagValues.findOne({
+            where: {
+                tagId: outputTag.id,
+                createdAt: {
+                    [Op.between]: [job.actualStartTime, job.actualEndTime]
+                },
+                [Op.and]: [
+                    sequelize.literal(`CAST(value AS DECIMAL(20,2)) > ${baselineValue}`)
+                ]
+            },
+            order: [['createdAt', 'ASC']],
+            attributes: ['createdAt', 'value']
+        });
+        
+        if (firstIncreaseRecord) {
+            qualificationMap[machineId] = firstIncreaseRecord.createdAt;
+            console.log(`   ✅ Machine ${machineId}: Qualified at ${firstIncreaseRecord.createdAt}`);
+        } else {
+            console.log(`   ❌ Machine ${machineId}: No production increase detected`);
+        }
+    }
+    
+    // Add qualification time to each alarm
+    return alarms.map(alarm => ({
+        ...alarm,
+        qualificationTime: qualificationMap[alarm.machineId] || null
+    }));
+}
+
 // Helper: Format alarms data
 function formatAlarms(alarms, isLiveMode = false) {
     const dayjs = require("dayjs");
@@ -442,6 +523,7 @@ function formatAlarms(alarms, isLiveMode = false) {
             duration: parseFloat(alarm.duration || 0).toFixed(2),
             reason: alarm.alarmReasonName || null,
             note: alarm.alarmNote || null,
+            qualificationTime: alarm.qualificationTime || null,
         };
     });
 }
@@ -671,6 +753,7 @@ function formatMergedBreakdownsForReport(mergedBreakdowns, options = {}) {
 
         const firstReason = contributing.map((a) => a.reason).find((r) => r != null && r !== "");
         const firstNote = contributing.map((a) => a.note).find((n) => n != null && n !== "");
+        const firstQualificationTime = contributing.map((a) => a.qualificationTime).find((qt) => qt != null);
 
         const row = {
             id: `merged_${jobId != null ? jobId : "single"}_${start.valueOf()}_${end.valueOf()}_${idx}`,
@@ -682,6 +765,7 @@ function formatMergedBreakdownsForReport(mergedBreakdowns, options = {}) {
             duration: parseFloat((Number.isFinite(durationMinutes) ? durationMinutes : 0).toFixed(2)),
             reason: firstReason ?? null,
             note: firstNote ?? null,
+            qualificationTime: firstQualificationTime ?? null,
             contributingCount: contributing.length,
             contributingAlarms: contributing.map((a) => ({
                 id: a.id,
@@ -694,6 +778,7 @@ function formatMergedBreakdownsForReport(mergedBreakdowns, options = {}) {
                 duration: a.duration,
                 reason: a.reason,
                 note: a.note,
+                qualificationTime: a.qualificationTime || null,
             })),
         };
 
@@ -1630,6 +1715,7 @@ async function calculateManHourMetrics(deps, job, line, casesCount, manHours = 0
 module.exports = {
     getTagValuesDifference,
     getProductionCountWithFallback,
+    enrichAlarmsWithQualification,
     formatAlarms,
     prepareParetoData,
     prepareWaterfallData,

@@ -1,3 +1,4 @@
+const db = require("../dbInit");
 const {
     Report,
     sequelize,
@@ -22,7 +23,7 @@ const {
     Location,
     TariffType,
     Settings,
-} = require("../dbInit");
+} = db;
 const dayjs = require("dayjs");
 const { LIVE_REPORT_WALL_TIMEZONE, liveInstantFromDbDate } = require("../utils/liveReportTime");
 const { parseGanttTimeWindow, calculateGanttTimeWindow, GANTT_ZOOM_CONFIG } = require("../utils/ganttTimeWindow");
@@ -33,6 +34,7 @@ const { generateAlarmJoinCondition } = require("../utils/alarmUtils");
 const {
     getTagValuesDifference,
     getProductionCountWithFallback,
+    enrichAlarmsWithQualification,
     formatAlarms,
     prepareParetoData,
     prepareWaterfallData,
@@ -775,7 +777,10 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
         console.log(`[HISTORICAL REPORT] Found ${alarms.length} historical alarms`);
     }
     
-    const formattedAlarms = formatAlarms(alarms, isLiveMode);
+    // Enrich alarms with machine qualification times (calculated at runtime)
+    const alarmsWithQualification = await enrichAlarmsWithQualification(alarms, job, db, Op, sequelize);
+    
+    const formattedAlarms = formatAlarms(alarmsWithQualification, isLiveMode);
 
     // Metrics
     const { calculateMetrics, calculateTrueEfficiency, calculateVOTProgram } = require("./Kpis.controller.js");
