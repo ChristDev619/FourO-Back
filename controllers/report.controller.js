@@ -769,6 +769,20 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     
     const netProduction = productionResult.bottleCount;
     const casesCount = productionResult.casesCount || 0;
+    const isKronesLine = (line.name || '').toLowerCase().includes('krones');
+
+    // Krones: display net production stays fillerout; Net/True efficiency VOT uses packer (csct × pack size)
+    let efficiencyProductionBottles = netProduction;
+    if (isKronesLine && casesCount > 0 && numberOfContainersPerPack > 0) {
+        efficiencyProductionBottles = Math.round(casesCount * numberOfContainersPerPack);
+        console.log(
+            `[REPORT] Krones: efficiency VOT uses packer bottles (csct): ${casesCount} × ${numberOfContainersPerPack} = ${efficiencyProductionBottles} (display net production fillerout: ${netProduction})`
+        );
+    } else if (isKronesLine) {
+        console.warn(
+            `[REPORT] Krones: no packer case delta for efficiency — VOT uses filler net production (${netProduction})`
+        );
+    }
 
     console.log(`[REPORT] Net Production: ${netProduction} bottles`);
     console.log(`[REPORT] Cases Count: ${casesCount} cases`);
@@ -777,10 +791,7 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     if (isRIM) {
         bottlesLost = fillerCount - netProduction;
     } else {
-        const lineName = line.name || '';
-        const lineNameLower = lineName.toLowerCase();
-        
-        if (lineNameLower.includes('krones')) {
+        if (isKronesLine) {
             bottlesLost = fillerCountAqua - netProduction;
         }
         // Ensure bottlesLost is a valid number (handle NaN or null cases)
@@ -859,15 +870,14 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
     let metricsTrueEff = { valueOperatingTime: 0, programDuration: 0, trueEfficiency: 0, isEstimated: false };
     try {
         const bottleneckMachineId = bottleneckMachine ? bottleneckMachine.id : machineIds[0];
-        // Pass netProduction to calculateMetrics so VOT uses netProduction instead of fillerCounter
-        metrics = await calculateMetrics(job.id, bottleneckMachineId, line.id, netProduction);
+        // Krones: VOT/Net & True efficiency use packer-derived bottles; other lines use netProduction
+        metrics = await calculateMetrics(job.id, bottleneckMachineId, line.id, efficiencyProductionBottles);
         
         // Only calculate true efficiency for completed jobs (not live reports)
         // For live reports, program.endDate is NULL, which causes calculateTrueEfficiency to throw an error
         if (!isLiveMode && program.endDate) {
             // HISTORICAL: Use actual program dates
-            // Pass netProduction to calculateTrueEfficiency so VOT uses netProduction instead of fillerCounter
-            metricsTrueEff = await calculateTrueEfficiency(program.id, job.id, line.id, null, netProduction);
+            metricsTrueEff = await calculateTrueEfficiency(program.id, job.id, line.id, null, efficiencyProductionBottles);
             metrics = { ...metrics, ...metricsTrueEff };
         } else if (isLiveMode) {
             // LIVE: Calculate estimated true efficiency
@@ -883,7 +893,7 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
                 
                 // Use calculateVOTProgram() to match historical True Efficiency calculation
                 // Note: ProgramDuration parameter is passed but not used in calculation (same as historical)
-                const votProgram = await calculateVOTProgram(job.id, line.id, productionTime, netProduction);
+                const votProgram = await calculateVOTProgram(job.id, line.id, productionTime, efficiencyProductionBottles);
                 
                 // Calculate program duration from program start to NOW
                 // Only use program data, not job data
