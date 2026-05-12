@@ -1462,7 +1462,7 @@ async function calculateEmsMetrics(deps, job, program, line, sku, netProduction,
  * @param {Object} errorData - Error details
  */
 async function sendEmsErrorEmail(errorData) {
-    const RECIPIENT = 'christian_chindy@hotmail.com';
+    const RECIPIENT = ['christian_chindy@hotmail.com', 'falam@teknologix-automation.com'];
     
     try {
         const subject = `🚨 [EMS] Critical Error - Price Per Liter Calculation Failed`;
