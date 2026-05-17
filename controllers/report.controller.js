@@ -45,6 +45,14 @@ const {
     calculateEmsMetrics,
     calculateManHourMetrics,
 } = require("./report.utils.js");
+const {
+    resolvePeriodDates,
+    getLinesForPlant,
+    aggregateJobsForLine,
+    mergeLineAggregates,
+    buildAggregatedEms,
+    buildAggregatedManHour,
+} = require("./report.plant.utils.js");
 
 // Helper function to get current (latest) tag value for live reports
 async function getCurrentTagValue(tagId) {
@@ -1276,6 +1284,10 @@ module.exports = {
             }
             const config = typeof report.config === 'string' ? JSON.parse(report.config) : report.config;
 
+            if (config.plantBased) {
+                return res.status(400).json({ message: "SKU filter is not available for plant-based reports" });
+            }
+
             // Only provide SKUs for non-job-based reports
             const isQuick = config.wtd || config.mtd || config.ytd || config.dr;
             if (!isQuick) {
@@ -1333,6 +1345,40 @@ module.exports = {
         }
     },
 
+    getReportLines: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const report = await Report.findByPk(id);
+            if (!report) {
+                return res.status(404).json({ message: "Report not found" });
+            }
+            const config = typeof report.config === 'string' ? JSON.parse(report.config) : report.config;
+            if (!config.plantBased) {
+                return res.status(400).json({ message: "Lines list is only available for plant-based reports" });
+            }
+
+            if (config.lines && config.lines.length > 0) {
+                return res.status(200).json({ lines: config.lines });
+            }
+
+            const plantId = config.selectedPlantId || config.selectedLocation?.id;
+            if (!plantId) {
+                return res.status(400).json({ message: "Plant ID not found in report config" });
+            }
+
+            const dbLines = await getLinesForPlant(plantId, { Location, Line, Machine, Op });
+            const lines = dbLines.map((l) => ({
+                lineId: l.id,
+                lineName: l.name,
+                locationId: l.locationId,
+            }));
+            res.status(200).json({ lines });
+        } catch (error) {
+            console.error("Error fetching report lines:", error);
+            res.status(500).json({ error: error.message });
+        }
+    },
+
     getReportData: async (req, res) => {
         try {
             const { id } = req.params;
@@ -1341,13 +1387,186 @@ module.exports = {
             if (skuFilter != null) skuFilter = String(skuFilter).trim();
             // Ignore accidental client stringification of non-primitives
             if (!skuFilter || skuFilter === '[object Object]') skuFilter = null;
+
+            let lineFilter = req.query.lineFilter;
+            if (Array.isArray(lineFilter)) lineFilter = lineFilter[0];
+            if (lineFilter != null) lineFilter = String(lineFilter).trim();
+            if (!lineFilter || lineFilter === 'all' || lineFilter === '[object Object]') lineFilter = null;
+
             const report = await Report.findByPk(id);
             if (!report) {
                 return res.status(404).json({ message: "Report not found" });
             }
             const config = typeof report.config === 'string' ? JSON.parse(report.config) : report.config;
 
-            // Detect quick filter
+            const deps = {
+                Recipie,
+                sequelize,
+                QueryTypes,
+                getTagValuesDifference,
+                TagRefs,
+                Tags,
+                TagValues,
+                Op,
+                formatAlarms,
+                calculateEmsMetrics,
+                calculateManHourMetrics,
+                Meters,
+                Unit,
+                Generator,
+                GeneratorMeter,
+                TariffUsage,
+                Tariff,
+                Sku,
+                Location,
+                TariffType,
+                Settings,
+            };
+
+            // --- Plant-based report (multi-line under parent plant) ---
+            if (config.plantBased) {
+                const isQuick = config.wtd || config.mtd || config.ytd || config.dr;
+                if (!isQuick) {
+                    return res.status(400).json({ message: "Plant-based report requires a period selection" });
+                }
+
+                const { startDate, endDate } = resolvePeriodDates(config, report.createdAt);
+                const plantId = config.selectedPlantId || config.selectedLocation?.id;
+                const plantName = config.selectedLocation?.name || "Plant";
+
+                let lines = await getLinesForPlant(plantId, { Location, Line, Machine, Op });
+                if (lineFilter) {
+                    lines = lines.filter((l) => String(l.id) === String(lineFilter));
+                }
+                if (!lines.length) {
+                    return res.status(404).json({ message: "No lines found for the selected plant" });
+                }
+
+                const lineResults = [];
+                for (const line of lines) {
+                    const jobs = await Job.findAll({
+                        where: {
+                            lineId: line.id,
+                            actualStartTime: { [Op.gte]: startDate },
+                            actualEndTime: { [Op.lte]: endDate },
+                        },
+                    });
+                    if (!jobs.length) continue;
+
+                    const lineAgg = await aggregateJobsForLine({
+                        jobs,
+                        line,
+                        report,
+                        Program,
+                        extractJobReportData,
+                        deps,
+                    });
+                    lineResults.push(lineAgg);
+                }
+
+                if (!lineResults.length) {
+                    const errorMessage = lineFilter
+                        ? `No jobs found for the selected line in the specified range`
+                        : "No jobs found in selected range for any line under this plant";
+                    return res.status(404).json({ message: errorMessage });
+                }
+
+                const volumeOfDiesel = parseFloat(report.volumeOfDiesel) || 0;
+                const manHours = parseFloat(report.manHours) || 0;
+
+                // Single line filter: return same shape as period report for that line
+                if (lineFilter && lineResults.length === 1) {
+                    const single = lineResults[0];
+                    const aggregatedEms = buildAggregatedEms(
+                        single.allEmsMetrics,
+                        single.totalCasesCount,
+                        volumeOfDiesel
+                    );
+                    const aggregatedManHour = buildAggregatedManHour(
+                        single.allManHourMetrics,
+                        single.totalCasesCount,
+                        manHours
+                    );
+
+                    return res.status(200).json({
+                        reportName: report.name,
+                        plantBased: true,
+                        general: {
+                            ...single.general,
+                            plantName,
+                            lineName: single.line.name,
+                        },
+                        production: single.production,
+                        kpis: single.kpis,
+                        kpisByLine: [{
+                            lineId: single.line.id,
+                            lineName: single.line.name,
+                            ...single.kpis,
+                            duration: single.totalDuration,
+                        }],
+                        paretoData: [single.paretoData],
+                        waterfallData: single.aggWaterfall,
+                        alarms: single.allAlarms,
+                        mergedBreakdowns: single.allMergedBreakdownRows,
+                        line: single.line,
+                        lines: [single.line],
+                        jobs: single.jobs,
+                        machines: single.line.machines,
+                        productionRunBatches: single.productionRunBatches,
+                        ems: aggregatedEms,
+                        manHourMetrics: aggregatedManHour,
+                    });
+                }
+
+                const merged = mergeLineAggregates(lineResults);
+                const aggregatedEms = buildAggregatedEms(
+                    merged.allEmsMetrics,
+                    merged.totalCasesCount,
+                    volumeOfDiesel
+                );
+                const aggregatedManHour = buildAggregatedManHour(
+                    merged.allManHourMetrics,
+                    merged.totalCasesCount,
+                    manHours
+                );
+
+                const firstLine = lineResults[0];
+
+                return res.status(200).json({
+                    reportName: report.name,
+                    plantBased: true,
+                    general: {
+                        plantName,
+                        lineName: lines.map((l) => l.name).join(", "),
+                        jobName: merged.general.jobName,
+                        startTime: merged.general.startTime,
+                        endTime: merged.general.endTime,
+                        duration: merged.totalDuration,
+                        programName: firstLine.general.programName,
+                        recipeName: "Multiple",
+                        programDuration: lineResults.reduce(
+                            (sum, r) => sum + (r.general.programDuration || 0),
+                            0
+                        ),
+                        bottleneckName: firstLine.general.bottleneckName,
+                    },
+                    production: merged.production,
+                    kpis: merged.kpis,
+                    kpisByLine: merged.kpisByLine,
+                    paretoData: merged.paretoData,
+                    waterfallData: lineResults[0]?.aggWaterfall || { labels: [], values: [] },
+                    alarms: merged.alarms,
+                    mergedBreakdowns: merged.mergedBreakdowns,
+                    lines: merged.lines,
+                    jobs: merged.jobs,
+                    machines: merged.lines.flatMap((l) => l.machines || []),
+                    productionRunBatches: merged.productionRunBatches,
+                    ems: aggregatedEms,
+                    manHourMetrics: aggregatedManHour,
+                });
+            }
+
+            // Detect quick filter (period-based, single line)
             const isQuick = config.wtd || config.mtd || config.ytd || config.dr;
             let startDate, endDate;
             if (isQuick) {

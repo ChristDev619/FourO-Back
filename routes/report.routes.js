@@ -24,6 +24,7 @@ router.get('/:id/data/live', reportController.getLiveReportData); // NEW: Live r
 router.get('/:id/gantt/live', reportController.getLiveGanttData); // NEW: Live Gantt chart for running jobs
 router.get('/:id/gantt/historical', reportController.getHistoricalGanttData); // NEW: Historical Gantt chart for completed jobs
 router.get('/:id/skus', reportController.getAvailableSkus);
+router.get('/:id/lines', reportController.getReportLines);
 router.put('/:id', reportController.updateReport);
 router.put('/reorder', reportController.reorderReports);
 router.put('/:id/favorite', reportController.toggleReportFavorite);
