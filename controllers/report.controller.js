@@ -1336,7 +1336,11 @@ module.exports = {
     getReportData: async (req, res) => {
         try {
             const { id } = req.params;
-            const { skuFilter } = req.query; // Add SKU filter parameter
+            let skuFilter = req.query.skuFilter;
+            if (Array.isArray(skuFilter)) skuFilter = skuFilter[0];
+            if (skuFilter != null) skuFilter = String(skuFilter).trim();
+            // Ignore accidental client stringification of non-primitives
+            if (!skuFilter || skuFilter === '[object Object]') skuFilter = null;
             const report = await Report.findByPk(id);
             if (!report) {
                 return res.status(404).json({ message: "Report not found" });
