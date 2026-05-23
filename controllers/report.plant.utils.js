@@ -292,6 +292,13 @@ async function aggregateJobsForLine({
             dayjs(job.actualStartTime),
             "minute"
         );
+        const jobProgramDuration =
+            jobProgram?.startDate && jobProgram?.endDate
+                ? Math.max(
+                      0,
+                      dayjs(jobProgram.endDate).diff(dayjs(jobProgram.startDate), "minute")
+                  )
+                : 0;
         return {
             id: job.id,
             jobName: job.jobName,
@@ -303,6 +310,7 @@ async function aggregateJobsForLine({
                 ? dayjs(job.actualEndTime).utc().format("DD/MM/YYYY HH:mm")
                 : null,
             duration: jobDuration,
+            programDuration: jobProgramDuration,
             recipeName: jobRecipe?.name || "N/A",
             skuId: job.skuId,
             programId: job.programId,

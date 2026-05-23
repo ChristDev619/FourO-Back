@@ -1284,7 +1284,7 @@ module.exports = {
             }
             const config = typeof report.config === 'string' ? JSON.parse(report.config) : report.config;
 
-            if (config.plantBased) {
+            if (config.plantBased === true) {
                 return res.status(400).json({ message: "SKU filter is not available for plant-based reports" });
             }
 
@@ -1353,7 +1353,7 @@ module.exports = {
                 return res.status(404).json({ message: "Report not found" });
             }
             const config = typeof report.config === 'string' ? JSON.parse(report.config) : report.config;
-            if (!config.plantBased) {
+            if (config.plantBased !== true) {
                 return res.status(400).json({ message: "Lines list is only available for plant-based reports" });
             }
 
@@ -1424,7 +1424,8 @@ module.exports = {
             };
 
             // --- Plant-based report (multi-line under parent plant) ---
-            if (config.plantBased) {
+            // Job-based reports always use the single-job path below, even if plantBased was set by mistake.
+            if (config.plantBased === true && !config.selectedJobId) {
                 const isQuick = config.wtd || config.mtd || config.ytd || config.dr;
                 if (!isQuick) {
                     return res.status(400).json({ message: "Plant-based report requires a period selection" });
@@ -1544,10 +1545,7 @@ module.exports = {
                         duration: merged.totalDuration,
                         programName: firstLine.general.programName,
                         recipeName: "Multiple",
-                        programDuration: lineResults.reduce(
-                            (sum, r) => sum + (r.general.programDuration || 0),
-                            0
-                        ),
+                        programDuration: merged.kpis.metrics.programDuration,
                         bottleneckName: firstLine.general.bottleneckName,
                     },
                     production: merged.production,
