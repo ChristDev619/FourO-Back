@@ -21,9 +21,9 @@ async function getTimeTypeDuration(machineId, jobId, timeType) {
             throw new Error("Job not found");
         }
 
-        // Use UTC times directly
+        // Use UTC times directly; running jobs have no actualEndTime yet
         const startTime = dayjs(job.actualStartTime).utc();
-        const endTime = dayjs(job.actualEndTime).utc();
+        const endTime = job.actualEndTime ? dayjs(job.actualEndTime).utc() : dayjs().utc();
 
         // Fetch tag
         const tag = await Tags.findOne({
@@ -169,6 +169,8 @@ async function fetchLostValue(lineId, jobId) {
         const job = await Job.findByPk(jobId);
         if (!job) throw new Error("Job not found");
 
+        const endBound = job.actualEndTime || new Date();
+
         // Fetch the first and last tag values between the job's start and end times
         const [firstValue, lastValue] = await Promise.all([
             TagValues.findOne({
@@ -176,7 +178,7 @@ async function fetchLostValue(lineId, jobId) {
                 order: [["createdAt", "ASC"]],
             }),
             TagValues.findOne({
-                where: { tagId: tag.id, createdAt: { [Op.lte]: job.actualEndTime } },
+                where: { tagId: tag.id, createdAt: { [Op.lte]: endBound } },
                 order: [["createdAt", "DESC"]],
             }),
         ]);
@@ -201,11 +203,9 @@ async function fetchBatchDuration(jobId) {//christ to check to make it only 1 ca
         const job = await Job.findByPk(jobId);
         if (!job) throw new Error("Job not found");
 
-        // Calculate duration in minutes
-        batchDuration = dayjs(job.actualEndTime).diff(
-            dayjs(job.actualStartTime),
-            "minute"
-        );
+        // Calculate duration in minutes (use now when job is still running)
+        const endInstant = job.actualEndTime ? dayjs(job.actualEndTime) : dayjs();
+        batchDuration = endInstant.diff(dayjs(job.actualStartTime), "minute");
         return batchDuration;
     } catch (error) {
         console.error("Error fetching batch duration:", error);

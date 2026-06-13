@@ -1909,11 +1909,16 @@ module.exports = {
             // Ensure volumeOfDiesel is a number (could be string from DB)
             const volumeOfDiesel = parseFloat(report.volumeOfDiesel) || 0;
             const manHours = parseFloat(report.manHours) || 0;
+            const jobStillRunning = job.actualEndTime == null;
+            if (jobStillRunning) {
+                console.log('[REPORT] Job is still running — using live extraction for /data request');
+            }
             const jobData = await extractJobReportData({ 
                 job, program, line, machineIds, bottleneckMachine, Recipie, sequelize, QueryTypes, 
                 getTagValuesDifference, TagRefs, Tags, TagValues, Op, formatAlarms, prepareParetoData, 
                 prepareWaterfallData, calculateEmsMetrics, calculateManHourMetrics, Meters, Unit, Generator, GeneratorMeter, 
-                TariffUsage, Tariff, Sku, volumeOfDiesel, manHours, Location, TariffType, Settings
+                TariffUsage, Tariff, Sku, volumeOfDiesel, manHours, Location, TariffType, Settings,
+                isLiveMode: jobStillRunning,
             });
 
             // Calculate program duration (from program start to program end, in minutes)
@@ -1949,6 +1954,7 @@ module.exports = {
             });
 
             res.status(200).json({
+                isLive: jobStillRunning || undefined,
                 reportName: report.name,
                 general: {
                     lineName: line.name,

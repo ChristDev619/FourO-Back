@@ -1354,11 +1354,12 @@ async function calculateEmsMetrics(deps, job, program, line, sku, netProduction,
         console.log('\n📊 Step 1: Calculating Total KWH Consumption...');
         console.log('  📌 Using Program dates (not Job dates) for KWH calculation per BA requirement');
         
+        const kwhEndTime = program.endDate ?? job.actualEndTime ?? new Date();
         const totalKwh = await calculateTotalKwhConsumption(
             { Tags, TagValues, Op, Meters, Unit, sequelize, QueryTypes, Line },
             line.id,
             program.startDate,
-            program.endDate
+            kwhEndTime
         );
         console.log('  ✅ Total KWH (using program dates):', totalKwh);
 
