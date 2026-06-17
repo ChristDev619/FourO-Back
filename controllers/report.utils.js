@@ -1297,7 +1297,7 @@ function calculateLitersFromSku(sku, bottleCount) {
  * @param {number} volumeOfDiesel - Volume of diesel from report (user input)
  * @returns {Promise<Object>} EMS metrics
  */
-async function calculateEmsMetrics(deps, job, program, line, sku, netProduction, casesCount, volumeOfDiesel = 0) {
+async function calculateEmsMetrics(deps, job, program, line, sku, netProduction, casesCount, volumeOfDiesel = 0, bottlesLost = 0) {
     try {
         console.log('═══════════════════════════════════════════════════════════');
         console.log('🚀 [EMS] calculateEmsMetrics - START');
@@ -1376,7 +1376,9 @@ async function calculateEmsMetrics(deps, job, program, line, sku, netProduction,
         // Calculate liters from SKU
         console.log('\n📏 Step 3: Calculating Total Liters from SKU...');
         const totalLiters = calculateLitersFromSku(sku, netProduction);
+        const lostLiters = calculateLitersFromSku(sku, bottlesLost);
         console.log('  ✅ Total Liters:', totalLiters);
+        console.log('  ✅ Lost Liters:', lostLiters);
 
         // Calculate metrics
         console.log('\n🧮 Step 4: Calculating Final Metrics...');
@@ -1427,7 +1429,8 @@ async function calculateEmsMetrics(deps, job, program, line, sku, netProduction,
             volumeOfDiesel: parseFloat(volumeOfDieselNum.toFixed(2)),
             costOfKwhPerDiesel: parseFloat(costOfKwhPerDiesel.toFixed(2)),
             pricePerLiter: parseFloat(pricePerLiter.toFixed(2)),
-            totalLiters: parseFloat(totalLiters.toFixed(2))
+            totalLiters: parseFloat(totalLiters.toFixed(2)),
+            lostLiters: parseFloat(lostLiters.toFixed(2)),
         };
 
         console.log('\n📊 Final EMS Metrics:');
@@ -1453,7 +1456,8 @@ async function calculateEmsMetrics(deps, job, program, line, sku, netProduction,
             volumeOfDiesel: volumeOfDiesel || 0,
             costOfKwhPerDiesel: 0,
             pricePerLiter: 0,
-            totalLiters: 0
+            totalLiters: 0,
+            lostLiters: 0,
         };
     }
 }

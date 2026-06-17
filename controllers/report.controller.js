@@ -1038,7 +1038,8 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
         volumeOfDiesel: volumeOfDieselNum,
         costOfKwhPerDiesel: 0,
         pricePerLiter: 0,
-        totalLiters: 0
+        totalLiters: 0,
+        lostLiters: 0
     };
 
     try {
@@ -1055,7 +1056,8 @@ async function extractJobReportData({ job, program, line, machineIds, bottleneck
             sku,
             netProduction,
             casesCount,
-            volumeOfDieselNum
+            volumeOfDieselNum,
+            bottlesLost
         );
     } catch (error) {
         console.error('Error calculating EMS metrics:', error);
@@ -2005,7 +2007,8 @@ module.exports = {
                     volumeOfDiesel: parseFloat(volumeOfDiesel) || 0,
                     costOfKwhPerDiesel: 0,
                     pricePerLiter: 0,
-                    totalLiters: 0
+                    totalLiters: 0,
+                    lostLiters: 0
                 },
                 manHourMetrics: jobData.manHourMetrics || {
                     casePerManHour: 'N/A',
@@ -2219,7 +2222,8 @@ module.exports = {
                     volumeOfDiesel: parseFloat(volumeOfDiesel) || 0,
                     costOfKwhPerDiesel: 0,
                     pricePerLiter: 0,
-                    totalLiters: 0
+                    totalLiters: 0,
+                    lostLiters: 0
                 },
                 manHourMetrics: jobData.manHourMetrics || {
                     casePerManHour: 'N/A',

@@ -6,6 +6,19 @@ const {
     formatMergedBreakdownsForReport,
 } = require("./report.utils.js");
 
+const ET_PRODUCTION_DIVISOR = 5678;
+
+function buildEtProductionFields(netLiters, lostLiters) {
+    const net = parseFloat(netLiters) || 0;
+    const lost = parseFloat(lostLiters) || 0;
+    return {
+        netLiters: parseFloat(net.toFixed(2)),
+        lostLiters: parseFloat(lost.toFixed(2)),
+        etProduction: parseFloat((net / ET_PRODUCTION_DIVISOR).toFixed(2)),
+        etLost: parseFloat((lost / ET_PRODUCTION_DIVISOR).toFixed(2)),
+    };
+}
+
 /**
  * Resolve start/end dates from report config (WTD/MTD/YTD/DR).
  */
@@ -132,6 +145,8 @@ async function aggregateJobsForLine({
     let allRecipes = [];
     let allEmsMetrics = [];
     let allManHourMetrics = [];
+    let totalNetLiters = 0;
+    let totalLostLiters = 0;
 
     for (const job of jobs) {
         const program = await Program.findByPk(job.programId);
@@ -189,6 +204,8 @@ async function aggregateJobsForLine({
         if (jobData.recipe) allRecipes.push(jobData.recipe);
         if (jobData.emsMetrics) allEmsMetrics.push(jobData.emsMetrics);
         if (jobData.manHourMetrics) allManHourMetrics.push(jobData.manHourMetrics);
+        totalNetLiters += parseFloat(jobData.emsMetrics?.totalLiters) || 0;
+        totalLostLiters += parseFloat(jobData.emsMetrics?.lostLiters) || 0;
     }
 
     const sumMetrics = (key) =>
@@ -326,6 +343,7 @@ async function aggregateJobsForLine({
             packerCounter: totalCasesCount,
             palCounter: totalPalletsCount,
             bottlesLost: totalBottlesLost,
+            ...buildEtProductionFields(totalNetLiters, totalLostLiters),
         },
         kpis: {
             availability: availability.toFixed(2),
@@ -407,6 +425,8 @@ function mergeLineAggregates(lineResults) {
     let allManHourMetrics = [];
     let allJobs = [];
     let allProductionRunBatches = [];
+    let totalNetLiters = 0;
+    let totalLostLiters = 0;
     const productionByLine = [];
     const kpisByLine = [];
     const lines = [];
@@ -418,6 +438,8 @@ function mergeLineAggregates(lineResults) {
         totalBottlesLost += p.bottlesLost;
         totalCasesCount += p.packerCounter;
         totalPalletsCount += p.palCounter;
+        totalNetLiters += parseFloat(p.netLiters) || 0;
+        totalLostLiters += parseFloat(p.lostLiters) || 0;
 
         productionByLine.push({
             lineId: result.line.id,
@@ -427,6 +449,10 @@ function mergeLineAggregates(lineResults) {
             packerCounter: p.packerCounter,
             palCounter: p.palCounter,
             bottlesLost: p.bottlesLost,
+            netLiters: p.netLiters,
+            lostLiters: p.lostLiters,
+            etProduction: p.etProduction,
+            etLost: p.etLost,
         });
 
         kpisByLine.push({
@@ -516,6 +542,7 @@ function mergeLineAggregates(lineResults) {
             palCounter: totalPalletsCount,
             bottlesLost: totalBottlesLost,
             byLine: productionByLine,
+            ...buildEtProductionFields(totalNetLiters, totalLostLiters),
         },
         kpis: {
             availability: availability.toFixed(2),
@@ -687,4 +714,6 @@ module.exports = {
     mergeLineAggregates,
     buildAggregatedEms,
     buildAggregatedManHour,
+    ET_PRODUCTION_DIVISOR,
+    buildEtProductionFields,
 };
