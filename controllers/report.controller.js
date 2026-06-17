@@ -1357,16 +1357,27 @@ module.exports = {
                 return res.status(400).json({ message: "Lines list is only available for plant-based reports" });
             }
 
-            if (config.lines && config.lines.length > 0) {
-                return res.status(200).json({ lines: config.lines });
-            }
-
             const plantId = config.selectedPlantId || config.selectedLocation?.id;
             if (!plantId) {
                 return res.status(400).json({ message: "Plant ID not found in report config" });
             }
 
             const dbLines = await getLinesForPlant(plantId, { Location, Line, Machine, Op });
+            const dbLineById = new Map(
+                dbLines.map((line) => [String(line.id), line])
+            );
+
+            if (config.lines && config.lines.length > 0) {
+                const lines = config.lines.map((line) => ({
+                    ...line,
+                    locationId:
+                        line.locationId ||
+                        dbLineById.get(String(line.lineId))?.locationId ||
+                        null,
+                }));
+                return res.status(200).json({ lines });
+            }
+
             const lines = dbLines.map((l) => ({
                 lineId: l.id,
                 lineName: l.name,
