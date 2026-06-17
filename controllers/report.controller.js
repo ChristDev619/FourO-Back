@@ -1731,15 +1731,8 @@ module.exports = {
                 const lastProgram = allPrograms[allPrograms.length - 1];
                 const recipe = allRecipes[0];
 
-                // Calculate program duration (from first program start to last program end, in minutes)
-                let programDuration = null;
-                if (firstProgram?.startDate && lastProgram?.endDate) {
-                    const programStart = dayjs(firstProgram.startDate);
-                    const programEnd = dayjs(lastProgram.endDate);
-                    if (programStart.isValid() && programEnd.isValid()) {
-                        programDuration = Math.max(0, programEnd.diff(programStart, 'minute'));
-                    }
-                }
+                // Sum each job's program duration (matches waterfall Operating Working Time)
+                const programDuration = sumMetrics('programDuration');
 
                 // Aggregate EMS metrics
                 // Ensure volumeOfDiesel is a number (could be string from DB or API)
