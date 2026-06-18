@@ -664,6 +664,32 @@ function buildAggregatedEms(allEmsMetrics, totalCasesCount, volumeOfDiesel) {
     return aggregatedEms;
 }
 
+const EIGHT_OZ_CASE_FACTOR = 5.678;
+
+/**
+ * Override EMS totals for plant reports using the plant flowmeter totalizer.
+ */
+function applyPlantEmsTotalizer(aggregatedEms, plantTotalizerLiters, etProduction) {
+    const rawLiters = parseFloat(plantTotalizerLiters) || 0;
+    const plantEt = rawLiters / ET_PRODUCTION_DIVISOR;
+    const netEt = parseFloat(etProduction) || 0;
+
+    aggregatedEms.plantTotalizerLiters = parseFloat(rawLiters.toFixed(2));
+    aggregatedEms.plantTotalizerEt = parseFloat(plantEt.toFixed(2));
+    aggregatedEms.plantLost = parseFloat((plantEt - netEt).toFixed(2));
+    aggregatedEms.totalLiters = aggregatedEms.plantTotalizerEt;
+
+    aggregatedEms.kwhPer8OzCase =
+        rawLiters > 0
+            ? aggregatedEms.totalKwh / (rawLiters / EIGHT_OZ_CASE_FACTOR)
+            : 0;
+    aggregatedEms.kwhPer8OzCase = parseFloat(
+        (parseFloat(aggregatedEms.kwhPer8OzCase) || 0).toFixed(4)
+    );
+
+    return aggregatedEms;
+}
+
 function buildAggregatedManHour(allManHourMetrics, totalCasesCount, manHours) {
     const aggregatedManHour = {
         casePerManHour:
@@ -714,6 +740,7 @@ module.exports = {
     mergeLineAggregates,
     buildAggregatedEms,
     buildAggregatedManHour,
+    applyPlantEmsTotalizer,
     ET_PRODUCTION_DIVISOR,
     buildEtProductionFields,
 };

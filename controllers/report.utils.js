@@ -1258,6 +1258,67 @@ async function getPricePerLiterAtJobStart({ Generator, Meters, GeneratorMeter, T
     }
 }
 
+const PLANT_FLOWMETER_METER_ID = 59;
+const PLANT_FLOWMETER_TAG_NAME = "Totaliser_Plant_Flowmeter";
+
+/**
+ * Plant flowmeter totalizer delta over a report period (meter id 59).
+ */
+async function getPlantFlowmeterTotalizerDelta(
+    { Tags, TagValues, Op },
+    startTime,
+    endTime
+) {
+    try {
+        const tag = await Tags.findOne({
+            where: {
+                taggableId: PLANT_FLOWMETER_METER_ID,
+                taggableType: "meter",
+                name: PLANT_FLOWMETER_TAG_NAME,
+            },
+        });
+
+        if (!tag) {
+            console.warn(
+                "⚠ [EMS] Plant flowmeter tag not found for meter",
+                PLANT_FLOWMETER_METER_ID
+            );
+            return { delta: 0, firstValue: null, lastValue: null };
+        }
+
+        const firstValue = await TagValues.findOne({
+            where: { tagId: tag.id, createdAt: { [Op.gte]: startTime } },
+            order: [["createdAt", "ASC"]],
+        });
+
+        const lastValue = await TagValues.findOne({
+            where: { tagId: tag.id, createdAt: { [Op.lte]: endTime } },
+            order: [["createdAt", "DESC"]],
+        });
+
+        if (firstValue && lastValue) {
+            const delta =
+                parseFloat(lastValue.value) - parseFloat(firstValue.value);
+            console.log(
+                `[EMS] Plant flowmeter delta: ${delta} (${firstValue.value} → ${lastValue.value})`
+            );
+            return {
+                delta,
+                firstValue: parseFloat(firstValue.value),
+                lastValue: parseFloat(lastValue.value),
+                firstAt: firstValue.createdAt,
+                lastAt: lastValue.createdAt,
+            };
+        }
+
+        console.warn("⚠ [EMS] No plant flowmeter values in period");
+        return { delta: 0, firstValue: null, lastValue: null };
+    } catch (error) {
+        console.error("❌ [EMS] Error reading plant flowmeter totalizer:", error);
+        return { delta: 0, firstValue: null, lastValue: null };
+    }
+}
+
 /**
  * Calculate liters from SKU size and bottle count
  * @param {Object} sku - SKU object with sizeValue and sizeUnit
@@ -1740,4 +1801,7 @@ module.exports = {
     getPricePerLiterAtJobStart,
     calculateLitersFromSku,
     calculateManHourMetrics,
+    getPlantFlowmeterTotalizerDelta,
+    PLANT_FLOWMETER_METER_ID,
+    PLANT_FLOWMETER_TAG_NAME,
 }; 

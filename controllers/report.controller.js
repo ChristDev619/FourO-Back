@@ -44,6 +44,7 @@ const {
     formatMergedBreakdownsForReport,
     calculateEmsMetrics,
     calculateManHourMetrics,
+    getPlantFlowmeterTotalizerDelta,
 } = require("./report.utils.js");
 const {
     resolvePeriodDates,
@@ -52,6 +53,7 @@ const {
     mergeLineAggregates,
     buildAggregatedEms,
     buildAggregatedManHour,
+    applyPlantEmsTotalizer,
 } = require("./report.plant.utils.js");
 
 // Helper function to get current (latest) tag value for live reports
@@ -1487,14 +1489,24 @@ module.exports = {
 
                 const volumeOfDiesel = parseFloat(report.volumeOfDiesel) || 0;
                 const manHours = parseFloat(report.manHours) || 0;
+                const plantFlowmeter = await getPlantFlowmeterTotalizerDelta(
+                    { Tags, TagValues, Op },
+                    startDate,
+                    endDate
+                );
 
                 // Single line filter: return same shape as period report for that line
                 if (lineFilter && lineResults.length === 1) {
                     const single = lineResults[0];
-                    const aggregatedEms = buildAggregatedEms(
+                    let aggregatedEms = buildAggregatedEms(
                         single.allEmsMetrics,
                         single.totalCasesCount,
                         volumeOfDiesel
+                    );
+                    aggregatedEms = applyPlantEmsTotalizer(
+                        aggregatedEms,
+                        plantFlowmeter.delta,
+                        single.production.etProduction
                     );
                     const aggregatedManHour = buildAggregatedManHour(
                         single.allManHourMetrics,
@@ -1533,10 +1545,15 @@ module.exports = {
                 }
 
                 const merged = mergeLineAggregates(lineResults);
-                const aggregatedEms = buildAggregatedEms(
+                let aggregatedEms = buildAggregatedEms(
                     merged.allEmsMetrics,
                     merged.totalCasesCount,
                     volumeOfDiesel
+                );
+                aggregatedEms = applyPlantEmsTotalizer(
+                    aggregatedEms,
+                    plantFlowmeter.delta,
+                    merged.production.etProduction
                 );
                 const aggregatedManHour = buildAggregatedManHour(
                     merged.allManHourMetrics,
