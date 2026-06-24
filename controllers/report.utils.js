@@ -1786,6 +1786,23 @@ async function calculateManHourMetrics(deps, job, line, casesCount, manHours = 0
     }
 }
 
+const ET_LOST_DIVISOR = 5678;
+
+/**
+ * Period Date Range EMS lost — SKU-based (not plant flowmeter).
+ */
+function applyPeriodDateRangeEmsLost(aggregatedEms, allEmsMetrics) {
+    const totalLostLiters = allEmsMetrics.reduce(
+        (sum, ems) => sum + (parseFloat(ems.lostLiters) || 0),
+        0
+    );
+    aggregatedEms.totalLostLiters = parseFloat(totalLostLiters.toFixed(2));
+    aggregatedEms.periodLost = parseFloat(
+        (totalLostLiters / ET_LOST_DIVISOR).toFixed(2)
+    );
+    return aggregatedEms;
+}
+
 module.exports = {
     getTagValuesDifference,
     getProductionCountWithFallback,
@@ -1804,4 +1821,5 @@ module.exports = {
     getPlantFlowmeterTotalizerDelta,
     PLANT_FLOWMETER_METER_ID,
     PLANT_FLOWMETER_TAG_NAME,
+    applyPeriodDateRangeEmsLost,
 }; 

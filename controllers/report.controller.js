@@ -45,6 +45,7 @@ const {
     calculateEmsMetrics,
     calculateManHourMetrics,
     getPlantFlowmeterTotalizerDelta,
+    applyPeriodDateRangeEmsLost,
 } = require("./report.utils.js");
 const {
     resolvePeriodDates,
@@ -1799,6 +1800,10 @@ module.exports = {
                 aggregatedEms.costOfKwhPerDiesel = parseFloat((parseFloat(aggregatedEms.costOfKwhPerDiesel) || 0).toFixed(2));
                 aggregatedEms.pricePerLiter = parseFloat((parseFloat(aggregatedEms.pricePerLiter) || 0).toFixed(2));
                 aggregatedEms.totalLiters = parseFloat((parseFloat(aggregatedEms.totalLiters) || 0).toFixed(2));
+
+                if (config.dr) {
+                    applyPeriodDateRangeEmsLost(aggregatedEms, allEmsMetrics);
+                }
 
                 // Aggregate Man Hour metrics
                 const aggregatedManHour = {
