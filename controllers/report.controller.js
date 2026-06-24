@@ -1583,7 +1583,7 @@ module.exports = {
                     kpis: merged.kpis,
                     kpisByLine: merged.kpisByLine,
                     paretoData: merged.paretoData,
-                    waterfallData: lineResults[0]?.aggWaterfall || { labels: [], values: [] },
+                    waterfallData: merged.aggWaterfall || { labels: [], values: [] },
                     alarms: merged.alarms,
                     mergedBreakdowns: merged.mergedBreakdowns,
                     lines: merged.lines,

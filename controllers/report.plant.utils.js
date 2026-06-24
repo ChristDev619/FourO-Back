@@ -534,6 +534,23 @@ function mergeLineAggregates(lineResults) {
     const firstJob = sortedJobs[0];
     const lastJob = sortedJobs[sortedJobs.length - 1];
 
+    const firstLineWaterfall = lineResults.find((r) => r.aggWaterfall?.labels?.length)
+        ?.aggWaterfall;
+    const aggWaterfall = {
+        labels: firstLineWaterfall?.labels || [],
+        values: [],
+    };
+    if (firstLineWaterfall) {
+        const labelCount = aggWaterfall.labels.length;
+        for (let i = 0; i < labelCount; i++) {
+            let sum = 0;
+            for (const result of lineResults) {
+                sum += parseFloat(result.aggWaterfall?.values[i]) || 0;
+            }
+            aggWaterfall.values.push(sum);
+        }
+    }
+
     return {
         production: {
             netProduction: totalNetProduction,
@@ -576,6 +593,7 @@ function mergeLineAggregates(lineResults) {
         },
         kpisByLine,
         paretoData: [paretoData],
+        aggWaterfall,
         alarms: allAlarms,
         mergedBreakdowns: allMergedBreakdownRows,
         jobs: allJobs,
