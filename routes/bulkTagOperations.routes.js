@@ -114,6 +114,37 @@ router.post("/ems",
 );
 
 /**
+ * @route   POST /api/bulk-tag-operations/cip
+ * @desc    Bulk ingest for CIP (Clean-In-Place) SCADA tags (ID_APP 212-232)
+ * @access  Public (you may want to add authentication middleware)
+ * @body    {
+ *   createdAt: string,     // Optional timestamp (YYYY-MM-DD HH:MM:00)
+ *   tags: {                // Dynamic tag operations for CIP
+ *     tagId: value,
+ *     tagId: value,
+ *     ...
+ *   }
+ * }
+ *
+ * Example:
+ * {
+ *   "createdAt": "2026-06-27 13:45:00",
+ *   "tags": {
+ *     "212": 1.25,
+ *     "213": 0,
+ *     "214": 1,
+ *     "232": 3
+ *   }
+ * }
+ */
+router.post("/cip",
+    rateLimitBulkOperations,
+    validateBulkTagOperations,
+    validateBulkOperationPermissions,
+    bulkTagOperationsController.createBulkTagOperationsCIP
+);
+
+/**
  * @route   POST /api/bulk-tag-operations/rim
  * @desc    Execute bulk tag operations for RIM L1 line
  * @access  Public (you may want to add authentication middleware)

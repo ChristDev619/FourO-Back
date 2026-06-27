@@ -1282,6 +1282,159 @@ exports.createBulkTagOperationsEMS = async (req, res) => {
 };
 
 /**
+ * Bulk Tag Operations API for CIP (Clean-In-Place) SCADA tags
+ * Creates multiple tag values for CIP tags (ID_APP 212-232) in a single transaction
+ *
+ * @param {Object} req.body - Request body containing:
+ *   - createdAt: Timestamp for the operation (optional, defaults to current time)
+ *   - tags: Object containing tag operations { tagId: value, tagId: value, ... }
+ *
+ * Example request body:
+ * {
+ *   "createdAt": "2026-06-27 13:45:00",
+ *   "tags": {
+ *     "212": 1.25,
+ *     "213": 0,
+ *     "232": 3
+ *   }
+ * }
+ */
+exports.createBulkTagOperationsCIP = async (req, res) => {
+    const transaction = await sequelize.transaction();
+    try {
+        const { createdAt, tags } = req.body;
+
+        if (!tags || typeof tags !== 'object' || Object.keys(tags).length === 0) {
+            await transaction.rollback();
+            return res.status(400).json({
+                error: "Tags object is required and must contain at least one tag operation"
+            });
+        }
+
+        const operationTime = createdAt ?
+            moment(createdAt).format("YYYY-MM-DD HH:mm:ss") :
+            moment().format("YYYY-MM-DD HH:mm:ss");
+
+        const tagValueInserts = [];
+        const tagIds = Object.keys(tags).map(id => parseInt(id));
+        const tagMap = new Map();
+
+        const allTags = await Tags.findAll({
+            where: { id: { [Op.in]: tagIds } },
+            transaction
+        });
+        allTags.forEach(tag => tagMap.set(tag.id, tag));
+
+        const previousValuesCIP = {};
+        const tagsWithCurrentValuesCIP = await Tags.findAll({
+            where: { id: { [Op.in]: tagIds } },
+            attributes: ['id', 'currentValue'],
+            transaction
+        });
+
+        tagsWithCurrentValuesCIP.forEach(tag => {
+            previousValuesCIP[tag.id] = tag.currentValue;
+        });
+        console.log(`🔍 (CIP) Fetched ${tagsWithCurrentValuesCIP.length} previous tag values from Tags.currentValue`);
+
+        for (const [tagIdStr, value] of Object.entries(tags)) {
+            const tagId = parseInt(tagIdStr);
+            const tag = tagMap.get(tagId);
+
+            if (!tag) {
+                await transaction.rollback();
+                return res.status(404).json({ error: `Tag with ID ${tagId} not found` });
+            }
+
+            if (tag.taggableType === "meter") {
+                await transaction.rollback();
+                return res.status(400).json({
+                    error: `Tag ${tagId} (${tag.name}) is a meter tag. Meter tags are not allowed in CIP endpoints. Use /api/bulk-tag-operations/ems for meter tags.`
+                });
+            }
+
+            tagValueInserts.push({
+                tagId,
+                value,
+                createdAt: operationTime,
+                updatedAt: operationTime
+            });
+        }
+
+        await TagValues.bulkCreate(tagValueInserts, {
+            transaction,
+            updateOnDuplicate: ['value', 'updatedAt']
+        });
+
+        const tagOperationsForNotificationsCIP = tagValueInserts.map(tv => ({
+            tagId: tv.tagId,
+            value: tv.value,
+            oldValue: previousValuesCIP[tv.tagId] || null
+        }));
+
+        if (tagValueInserts.length > 0) {
+            const updateTagIds = tagValueInserts.map(tv => tv.tagId);
+            const caseClauses = tagValueInserts.map(tv =>
+                `WHEN ${tv.tagId} THEN '${tv.value.toString().replace(/'/g, "''")}'`
+            ).join(' ');
+
+            await sequelize.query(`
+                UPDATE Tags
+                SET
+                    currentValue = CASE id ${caseClauses} END,
+                    lastValueUpdatedAt = :operationTime
+                WHERE id IN (:tagIds)
+            `, {
+                replacements: {
+                    tagIds: updateTagIds,
+                    operationTime
+                },
+                type: sequelize.QueryTypes.UPDATE,
+                transaction
+            });
+            console.log(`✅ (CIP) Updated ${tagValueInserts.length} Tags.currentValue entries (bulk UPDATE)`);
+        }
+
+        await transaction.commit();
+
+        setImmediate(() => {
+            checkAndTriggerNotifications(tagOperationsForNotificationsCIP, operationTime)
+                .catch(err => console.error('❌ CIP Notification check failed:', err.message));
+        });
+
+        res.status(201).json({
+            message: "CIP bulk tag operations completed successfully",
+            summary: {
+                operationTime,
+                tagsProcessed: Object.keys(tags).length,
+                specialTagsProcessed: 0,
+                jobsForRecalculation: 0,
+                jobsDeferred: 0,
+                metadata: {
+                    type: "cip",
+                    productionStatus: "N/A"
+                }
+            },
+            tagOperations: Object.entries(tags).map(([tagId, value]) => ({
+                tagId: parseInt(tagId),
+                value,
+                createdAt: operationTime
+            }))
+        });
+
+    } catch (error) {
+        if (!transaction.finished) {
+            await transaction.rollback();
+        }
+        console.error("Error in CIP bulk tag operations:", error);
+        res.status(500).json({
+            error: error.message,
+            details: "CIP bulk tag operation failed and was rolled back"
+        });
+    }
+};
+
+/**
  * Bulk Tag Operations API for RIM L1 Line
  * Creates multiple tag values for RIM L1 line in a single transaction
  * 
